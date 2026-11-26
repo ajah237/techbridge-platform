@@ -1,58 +1,66 @@
 import { useEffect, useState } from "react";
-import { Link, Navigate } from "react-router-dom";
+import { Link, Navigate, useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { useAdminRole } from "@/hooks/useAdminRole";
-import { supabase } from "@/integrations/supabase/client";
 import MfaChallenge from "@/components/MfaChallenge";
 import { Button } from "@/components/ui/button";
-import { ShieldAlert } from "lucide-react";
+import { ShieldAlert, ArrowLeft } from "lucide-react";
+import {
+  ADMIN_MFA_TIMEOUT_MS,
+  isAdminMfaVerified,
+  touchAdminMfaActivity,
+} from "@/integrations/supabase/localBackend";
 
 /**
- * Gates the admin section on:
+ * Gates the /admin section on:
  *   1. Authenticated user
- *   2. `admin` role
- *   3. AAL2 session if the user has a verified TOTP factor
+ *   2. Strict `admin` role (only bfozoh@gmail.com, ajahbefere@gmail.com, or manually promoted admins)
+ *   3. 6-Digit Admin Security PIN (MFA) verification with 30-minute inactivity & tab-close auto-lock
  */
-const AdminRoute = ({ children, requireMfa = false }: { children: React.ReactNode; requireMfa?: boolean }) => {
+const AdminRoute = ({ children }: { children: React.ReactNode; requireMfa?: boolean }) => {
   const { user, loading: authLoading } = useAuth();
   const userId = user?.id ?? null;
   const { isAdmin, loading: roleLoading } = useAdminRole();
-  const [aalChecked, setAalChecked] = useState(false);
-  const [needsStepUp, setNeedsStepUp] = useState(false);
-  const [hasFactor, setHasFactor] = useState(false);
+  const navigate = useNavigate();
+  const [mfaVerified, setMfaVerified] = useState(false);
 
   useEffect(() => {
-    let cancelled = false;
     if (!userId || !isAdmin) {
-      setAalChecked(false);
-      setNeedsStepUp(false);
-      setHasFactor(false);
+      setMfaVerified(false);
       return;
     }
-    setAalChecked(false);
-    (async () => {
-      try {
-        const [{ data: aalData }, { data: factorsData }] = await Promise.all([
-          supabase.auth.mfa.getAuthenticatorAssuranceLevel(),
-          supabase.auth.mfa.listFactors(),
-        ]);
-        if (cancelled) return;
-        const verifiedTotp = factorsData?.totp?.some((f) => f.status === "verified") ?? false;
-        setHasFactor(verifiedTotp);
-        const currentLevel = aalData?.currentLevel ?? "aal1";
-        setNeedsStepUp(verifiedTotp && currentLevel !== "aal2");
-      } catch (err) {
-        console.error("[AdminRoute] MFA check error:", err);
-      } finally {
-        if (!cancelled) setAalChecked(true);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
+    const verified = isAdminMfaVerified(userId);
+    setMfaVerified(verified);
   }, [userId, isAdmin]);
 
-  if (authLoading || roleLoading || (user && isAdmin && !aalChecked)) {
+  // Monitor activity and enforce 30-minute inactivity timeout while inside /admin
+  useEffect(() => {
+    if (!userId || !isAdmin || !mfaVerified) return;
+
+    const onActivity = () => {
+      if (!isAdminMfaVerified(userId)) {
+        setMfaVerified(false);
+      } else {
+        touchAdminMfaActivity(userId);
+      }
+    };
+
+    const events = ["mousedown", "keydown", "scroll", "touchstart"] as const;
+    events.forEach((ev) => window.addEventListener(ev, onActivity, { passive: true }));
+
+    const interval = window.setInterval(() => {
+      if (!isAdminMfaVerified(userId)) {
+        setMfaVerified(false);
+      }
+    }, Math.min(30_000, ADMIN_MFA_TIMEOUT_MS));
+
+    return () => {
+      events.forEach((ev) => window.removeEventListener(ev, onActivity));
+      window.clearInterval(interval);
+    };
+  }, [userId, isAdmin, mfaVerified]);
+
+  if (authLoading || roleLoading) {
     return (
       <div className="min-h-dvh flex items-center justify-center">
         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
@@ -60,35 +68,37 @@ const AdminRoute = ({ children, requireMfa = false }: { children: React.ReactNod
     );
   }
 
-  if (!user) return <Navigate to="/auth" replace />;
-  if (!isAdmin) return <Navigate to="/" replace />;
+  if (!user) return <Navigate to="/auth?redirect=/admin" replace />;
 
-  if (needsStepUp) {
+  if (!isAdmin) {
     return (
-      <MfaChallenge
-        open
-        onVerified={() => setNeedsStepUp(false)}
-        onCancel={() => {
-          window.location.href = "/";
-        }}
-      />
+      <div className="min-h-dvh flex items-center justify-center p-6 bg-background">
+        <div className="max-w-md text-center space-y-4 rounded-2xl border border-destructive/30 bg-destructive/5 p-8">
+          <ShieldAlert className="h-12 w-12 text-destructive mx-auto" />
+          <h1 className="text-xl font-heading font-bold">Access Restricted — System Administrators Only</h1>
+          <p className="text-sm text-muted-foreground">
+            Your account (<strong>{user.email}</strong>) is registered as a standard participant and does not have
+            permission to access the TechBridge System Admin Dashboard.
+          </p>
+          <div className="flex justify-center gap-3 pt-2">
+            <Button asChild variant="outline" className="gap-1.5">
+              <Link to="/dashboard">
+                <ArrowLeft className="h-4 w-4" /> Go to My Dashboard
+              </Link>
+            </Button>
+          </div>
+        </div>
+      </div>
     );
   }
 
-  if (requireMfa && !hasFactor) {
+  if (!mfaVerified) {
     return (
-      <div className="min-h-dvh flex items-center justify-center p-6">
-        <div className="max-w-md text-center space-y-4">
-          <ShieldAlert className="h-10 w-10 text-destructive mx-auto" />
-          <h1 className="text-xl font-heading font-bold">Two-factor authentication required</h1>
-          <p className="text-sm text-muted-foreground">
-            Admins must enable an authenticator app before accessing the admin area.
-          </p>
-          <Button asChild>
-            <Link to="/account/security">Enable 2FA</Link>
-          </Button>
-        </div>
-      </div>
+      <MfaChallenge
+        open
+        onVerified={() => setMfaVerified(true)}
+        onCancel={() => navigate("/dashboard", { replace: true })}
+      />
     );
   }
 

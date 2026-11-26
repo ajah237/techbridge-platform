@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import SEO from "@/components/SEO";
 import { Link } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
+import { useAdminRole } from "@/hooks/useAdminRole";
 import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -47,6 +48,7 @@ interface Notification {
 
 const Dashboard = () => {
   const { user } = useAuth();
+  const { isAdmin } = useAdminRole();
   const { t } = useTranslation();
   const [profile, setProfile] = useState<Tables<"profiles"> | null>(null);
   const [registrations, setRegistrations] = useState<RegWithEvent[]>([]);
@@ -447,11 +449,13 @@ const Dashboard = () => {
                 <User size={16} /> Edit Profile
               </Link>
             </Button>
-            <Button asChild variant="secondary" className="flex-1 gap-2">
-              <Link to="/admin">
-                <Sparkles size={16} /> System Admin Dashboard
-              </Link>
-            </Button>
+            {isAdmin && (
+              <Button asChild variant="secondary" className="flex-1 gap-2">
+                <Link to="/admin">
+                  <Sparkles size={16} /> System Admin Dashboard
+                </Link>
+              </Button>
+            )}
             <Button asChild className="flex-1 gap-2 bg-gradient-primary text-primary-foreground hover:opacity-90">
               <Link to="/events">
                 <Calendar size={16} /> Browse Events

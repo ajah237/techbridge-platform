@@ -1,18 +1,40 @@
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/contexts/AuthContext";
+import { useAdminRole } from "@/hooks/useAdminRole";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { InputOTP, InputOTPGroup, InputOTPSlot } from "@/components/ui/input-otp";
 import { toast } from "sonner";
-import { ShieldCheck, ShieldOff, Loader2 } from "lucide-react";
+import { ShieldCheck, ShieldOff, Loader2, KeyRound, Lock, Eye, EyeOff, ArrowRight } from "lucide-react";
 import SEO from "@/components/SEO";
 import DOMPurify from "dompurify";
+import {
+  getAdminMfaPin,
+  setAdminMfaPin,
+  isAdminMfaVerified,
+  lockAdminMfaSession,
+  verifyAdminMfaCode,
+} from "@/integrations/supabase/localBackend";
 
 type Factor = { id: string; status: string; friendly_name?: string | null };
 
 const AccountSecurity = () => {
+  const { user } = useAuth();
+  const { isAdmin } = useAdminRole();
   const [factors, setFactors] = useState<Factor[]>([]);
   const [loading, setLoading] = useState(true);
+
+  // Admin 6-Digit PIN state
+  const [currentPin, setCurrentPin] = useState("");
+  const [newPin, setNewPin] = useState("");
+  const [confirmPin, setConfirmPin] = useState("");
+  const [showCurrentPin, setShowCurrentPin] = useState(false);
+  const [mfaActive, setMfaActive] = useState(false);
 
   // Enrollment flow state
   const [enrolling, setEnrolling] = useState(false);
@@ -30,12 +52,45 @@ const AccountSecurity = () => {
     } else {
       setFactors(data.totp ?? []);
     }
+    if (user?.id) {
+      setCurrentPin(getAdminMfaPin(user.id));
+      setMfaActive(isAdminMfaVerified(user.id));
+    }
     setLoading(false);
   };
 
   useEffect(() => {
     loadFactors();
-  }, []);
+  }, [user?.id]);
+
+  const handleUpdatePin = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!/^\d{6}$/.test(newPin)) {
+      toast.error("Your new Admin Security PIN must be exactly 6 digits (0-9).");
+      return;
+    }
+    if (newPin !== confirmPin) {
+      toast.error("New PIN and confirmation PIN do not match.");
+      return;
+    }
+    try {
+      setAdminMfaPin(newPin, user?.id);
+      verifyAdminMfaCode(newPin, user?.id);
+      setCurrentPin(newPin);
+      setMfaActive(true);
+      setNewPin("");
+      setConfirmPin("");
+      toast.success("6-digit Admin Security PIN updated and verified!");
+    } catch (err: any) {
+      toast.error(err?.message || "Failed to update PIN.");
+    }
+  };
+
+  const handleLockSession = () => {
+    lockAdminMfaSession(user?.id);
+    setMfaActive(false);
+    toast.info("Admin MFA session locked. Your 6-digit PIN will be required next time you open /admin.");
+  };
 
   const startEnroll = async () => {
     setEnrolling(true);
@@ -109,19 +164,110 @@ const AccountSecurity = () => {
   const verified = factors.filter((f) => f.status === "verified");
 
   return (
-    <main className="pt-24 pb-16 min-h-dvh container max-w-2xl">
+    <main className="pt-24 pb-16 min-h-dvh container max-w-2xl space-y-6">
       <SEO title="Account security" description="Manage two-factor authentication and session security for your TechBridge account." noIndex />
-      <h1 className="text-3xl font-heading font-bold mb-2">Account security</h1>
-      <p className="text-muted-foreground mb-8">Add an extra layer of protection with two-factor authentication.</p>
+      <div>
+        <h1 className="text-3xl font-heading font-bold mb-2">Account Security &amp; MFA</h1>
+        <p className="text-muted-foreground">
+          Manage your multi-factor authentication and session security for TechBridge.
+        </p>
+      </div>
+
+      {isAdmin && (
+        <Card className="border-primary/40">
+          <CardHeader>
+            <div className="flex items-center justify-between gap-2">
+              <CardTitle className="flex items-center gap-2">
+                <KeyRound className="h-5 w-5 text-primary" />
+                System Admin 6-Digit Security PIN (MFA)
+              </CardTitle>
+              <Badge variant={mfaActive ? "default" : "secondary"}>
+                {mfaActive ? "Session Unlocked (30m timeout)" : "Session Locked"}
+              </Badge>
+            </div>
+            <CardDescription>
+              Required whenever an authorized System Administrator (<strong>bfozoh@gmail.com</strong> or{" "}
+              <strong>ajahbefere@gmail.com</strong>) enters <code>/admin</code>. Automatically locks when the browser
+              tab closes or after 30 minutes of inactivity.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-5">
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg bg-muted/40 border border-border/60 p-3">
+              <div className="space-y-0.5">
+                <p className="text-xs text-muted-foreground">Current Active 6-Digit Admin PIN</p>
+                <div className="flex items-center gap-2">
+                  <code className="font-mono text-base font-bold tracking-widest">
+                    {showCurrentPin ? currentPin : "••••••"}
+                  </code>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 px-2 text-xs gap-1"
+                    onClick={() => setShowCurrentPin((v) => !v)}
+                  >
+                    {showCurrentPin ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                    {showCurrentPin ? "Hide" : "Reveal"}
+                  </Button>
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {mfaActive && (
+                  <Button type="button" variant="outline" size="sm" onClick={handleLockSession} className="gap-1.5">
+                    <Lock className="h-3.5 w-3.5" /> Lock Admin Session Now
+                  </Button>
+                )}
+                <Button asChild size="sm" className="gap-1.5 bg-gradient-primary text-primary-foreground">
+                  <Link to="/admin">
+                    Open Admin Dashboard <ArrowRight className="h-3.5 w-3.5" />
+                  </Link>
+                </Button>
+              </div>
+            </div>
+
+            <form onSubmit={handleUpdatePin} className="grid sm:grid-cols-3 gap-3 pt-2 border-t border-border/50">
+              <div className="space-y-1.5">
+                <Label className="text-xs">New 6-Digit PIN</Label>
+                <Input
+                  type="password"
+                  inputMode="numeric"
+                  maxLength={6}
+                  placeholder="6 digits (e.g. 237692)"
+                  value={newPin}
+                  onChange={(e) => setNewPin(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                  className="font-mono tracking-widest"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs">Confirm 6-Digit PIN</Label>
+                <Input
+                  type="password"
+                  inputMode="numeric"
+                  maxLength={6}
+                  placeholder="Repeat 6 digits"
+                  value={confirmPin}
+                  onChange={(e) => setConfirmPin(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                  className="font-mono tracking-widest"
+                />
+              </div>
+              <div className="flex items-end">
+                <Button type="submit" className="w-full" disabled={newPin.length !== 6 || confirmPin.length !== 6}>
+                  Save New Admin PIN
+                </Button>
+              </div>
+            </form>
+          </CardContent>
+        </Card>
+      )}
 
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <ShieldCheck className="h-5 w-5 text-primary" />
-            Two-factor authentication (TOTP)
+            Two-factor authentication (TOTP Authenticator App)
           </CardTitle>
           <CardDescription>
-            Use an authenticator app like 1Password, Authy, or Google Authenticator. Required for admin actions.
+            Optionally pair an authenticator app like 1Password, Authy, or Google Authenticator.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -130,7 +276,7 @@ const AccountSecurity = () => {
               <Loader2 className="h-4 w-4 animate-spin" /> Loading…
             </div>
           ) : verified.length === 0 && !enrolling ? (
-            <Button onClick={startEnroll}>Enable 2FA</Button>
+            <Button variant="outline" onClick={startEnroll}>Enable Authenticator App (2FA)</Button>
           ) : null}
 
           {verified.map((f) => (
@@ -164,7 +310,7 @@ const AccountSecurity = () => {
                   Or enter this code manually: <code className="font-mono">{secret}</code>
                 </p>
               )}
-              <p className="text-sm">Enter the 6-digit code from the app:</p>
+              <p className="text-sm">Enter a 6-digit code to verify:</p>
               <div className="flex justify-center">
                 <InputOTP maxLength={6} value={code} onChange={setCode} aria-label="6-digit verification code">
                   <InputOTPGroup>

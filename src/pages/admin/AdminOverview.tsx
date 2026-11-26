@@ -14,8 +14,10 @@ import {
   ShieldCheck,
   Database,
   RefreshCw,
+  Lock,
 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
+import { lockAdminMfaSession } from "@/integrations/supabase/localBackend";
 import { downloadCsv } from "@/lib/registration";
 import {
   ChartContainer,
@@ -268,6 +270,17 @@ const AdminOverview = () => {
         <div className="flex flex-wrap gap-2">
           <Button variant="outline" size="sm" onClick={fetchAll} className="gap-1.5">
             <RefreshCw className="h-4 w-4" /> Refresh Data
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              lockAdminMfaSession();
+              window.location.reload();
+            }}
+            className="gap-1.5"
+          >
+            <Lock className="h-4 w-4" /> Lock Admin Session
           </Button>
           <Button size="sm" onClick={exportAllCollectedData} className="gap-1.5 bg-gradient-primary text-primary-foreground">
             <Download className="h-4 w-4" /> Export All Collected Data (CSV)

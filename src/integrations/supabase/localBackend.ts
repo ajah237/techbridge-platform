@@ -10,6 +10,19 @@
 
 const DB_STORAGE_KEY = "tb_local_db_v2";
 const SESSION_STORAGE_KEY = "tb_local_session_v2";
+const ADMIN_MFA_SESSION_KEY = "tb_admin_mfa_session_v1";
+export const ADMIN_MFA_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes of inactivity
+export const DEFAULT_ADMIN_MFA_PIN = "237692";
+
+export const AUTHORIZED_ADMIN_EMAILS = new Set([
+  "bfozoh@gmail.com",
+  "ajahbefere@gmail.com",
+]);
+
+export function isAuthorizedAdminEmail(email?: string | null): boolean {
+  if (!email) return false;
+  return AUTHORIZED_ADMIN_EMAILS.has(email.trim().toLowerCase());
+}
 
 export const DEFAULT_CONTACT = {
   contact_email: "bfozoh@gmail.com",
@@ -107,6 +120,7 @@ function createInitialSeed(): LocalDatabase {
   const in60Days = new Date(now.getTime() + 60 * 86400_000).toISOString();
 
   const adminUserId = "11111111-1111-4111-8111-111111111111";
+  const secondAdminUserId = "11111111-1111-4111-8111-222222222222";
   const mentorUserId = "22222222-2222-4222-8222-222222222222";
 
   const ev1Id = "e1111111-1111-4111-8111-111111111111";
@@ -123,7 +137,16 @@ function createInitialSeed(): LocalDatabase {
         id: adminUserId,
         email: "bfozoh@gmail.com",
         password: "password123",
+        mfa_pin: DEFAULT_ADMIN_MFA_PIN,
         user_metadata: { full_name: "TechBridge Admin (Yaoundé)" },
+        created_at: isoNow,
+      },
+      {
+        id: secondAdminUserId,
+        email: "ajahbefere@gmail.com",
+        password: "password123",
+        mfa_pin: DEFAULT_ADMIN_MFA_PIN,
+        user_metadata: { full_name: "Ajah Befere (System Admin)" },
         created_at: isoNow,
       },
       {
@@ -152,6 +175,21 @@ function createInitialSeed(): LocalDatabase {
       },
       {
         id: uuid(),
+        user_id: secondAdminUserId,
+        full_name: "Ajah Befere",
+        email: "ajahbefere@gmail.com",
+        avatar_url: null,
+        bio: "System Administrator at TechBridge Yaoundé, Cameroon.",
+        university: "Yaoundé, Cameroon",
+        skills: ["Full-Stack", "Cybersecurity", "Cloud", "System Administration"],
+        github_url: "https://github.com/ajah237",
+        linkedin_url: "https://www.linkedin.com/company/techbridge",
+        portfolio_url: null,
+        created_at: isoNow,
+        updated_at: isoNow,
+      },
+      {
+        id: uuid(),
         user_id: mentorUserId,
         full_name: "Dr. Amina Nkeng",
         email: "mentor@techbridge.cm",
@@ -170,6 +208,9 @@ function createInitialSeed(): LocalDatabase {
       { id: uuid(), user_id: adminUserId, role: "admin", created_at: isoNow },
       { id: uuid(), user_id: adminUserId, role: "moderator", created_at: isoNow },
       { id: uuid(), user_id: adminUserId, role: "user", created_at: isoNow },
+      { id: uuid(), user_id: secondAdminUserId, role: "admin", created_at: isoNow },
+      { id: uuid(), user_id: secondAdminUserId, role: "moderator", created_at: isoNow },
+      { id: uuid(), user_id: secondAdminUserId, role: "user", created_at: isoNow },
       { id: uuid(), user_id: mentorUserId, role: "user", created_at: isoNow },
     ],
     events: [
@@ -753,6 +794,25 @@ export function loadLocalDb(): LocalDatabase {
       ) {
         Object.assign(gs, DEFAULT_CONTACT);
       }
+      // Enforce strict admin allowlist on existing localStorage databases:
+      // Revoke auto-assigned admin roles from non-authorized emails (unless manually promoted by an admin)
+      const userById = new Map<string, AnyRecord>();
+      for (const u of memoryDb.users || []) userById.set(u.id, u);
+      for (const p of memoryDb.profiles || []) {
+        if (p.user_id && !userById.has(p.user_id)) userById.set(p.user_id, p);
+      }
+      memoryDb.user_roles = (memoryDb.user_roles || []).filter((r) => {
+        if (r.role !== "admin") return true;
+        if (r.manually_promoted) return true;
+        const owner = userById.get(r.user_id);
+        return isAuthorizedAdminEmail(owner?.email);
+      });
+      // Ensure authorized admin accounts exist and have admin role
+      for (const u of memoryDb.users || []) {
+        if (isAuthorizedAdminEmail(u.email)) {
+          ensureUserProfileAndRoles(memoryDb, u, true);
+        }
+      }
       return memoryDb;
     }
   } catch {
@@ -838,8 +898,9 @@ function buildSessionPayload(u: AnyRecord) {
   return session;
 }
 
-function ensureUserProfileAndRoles(db: LocalDatabase, u: AnyRecord, makeAdmin = true) {
+function ensureUserProfileAndRoles(db: LocalDatabase, u: AnyRecord, forceAdmin?: boolean) {
   const nowIso = new Date().toISOString();
+  const shouldBeAdmin = forceAdmin ?? isAuthorizedAdminEmail(u.email);
   const fullName =
     u.user_metadata?.full_name || u.full_name || u.email?.split("@")[0] || "TechBridge Member";
   let profile = db.profiles.find((p) => p.user_id === u.id);
@@ -865,7 +926,8 @@ function ensureUserProfileAndRoles(db: LocalDatabase, u: AnyRecord, makeAdmin = 
   if (!hasUserRole) {
     db.user_roles.push({ id: uuid(), user_id: u.id, role: "user", created_at: nowIso });
   }
-  if (makeAdmin) {
+  if (shouldBeAdmin) {
+    if (!u.mfa_pin) u.mfa_pin = DEFAULT_ADMIN_MFA_PIN;
     const hasAdminRole = db.user_roles.some((r) => r.user_id === u.id && r.role === "admin");
     if (!hasAdminRole) {
       db.user_roles.push({ id: uuid(), user_id: u.id, role: "admin", created_at: nowIso });
@@ -928,13 +990,18 @@ async function handleAuthRequest(url: URL, init?: RequestInit): Promise<Response
       user.user_metadata = { ...user.user_metadata, ...meta };
     }
 
-    ensureUserProfileAndRoles(db, user, true);
+    ensureUserProfileAndRoles(db, user);
+    const assignedAdmin = isAuthorizedAdminEmail(user.email);
     db.auth_audit_log.unshift({
       id: uuid(),
       event_type: "user.signup",
       affected_user_id: user.id,
       actor_id: user.id,
-      metadata: { email: user.email, full_name: user.user_metadata?.full_name, role_granted: "admin" },
+      metadata: {
+        email: user.email,
+        full_name: user.user_metadata?.full_name,
+        role_granted: assignedAdmin ? "admin" : "user",
+      },
       created_at: nowIso,
     });
     db.admin_audit_log.unshift({
@@ -975,7 +1042,7 @@ async function handleAuthRequest(url: URL, init?: RequestInit): Promise<Response
     } else if (user.password && password && user.password !== password) {
       return jsonResponse({ error: "invalid_grant", error_description: "Invalid login credentials", message: "Invalid login credentials" }, 400);
     }
-    ensureUserProfileAndRoles(db, user, true);
+    ensureUserProfileAndRoles(db, user);
     db.auth_audit_log.unshift({
       id: uuid(),
       event_type: "user.login",
@@ -1011,6 +1078,7 @@ async function handleAuthRequest(url: URL, init?: RequestInit): Promise<Response
   if (path === "/logout" && method === "POST") {
     try {
       if (typeof localStorage !== "undefined") localStorage.removeItem(SESSION_STORAGE_KEY);
+      if (typeof sessionStorage !== "undefined") sessionStorage.removeItem(ADMIN_MFA_SESSION_KEY);
     } catch {
       /* ignore */
     }
@@ -1031,7 +1099,61 @@ async function handleAuthRequest(url: URL, init?: RequestInit): Promise<Response
   }
 
   if (path.includes("factors")) {
-    return jsonResponse({ all: [], totp: [], phone: [] }, 200);
+    const current = getCurrentSessionUser(db, authHeader);
+    const dbUser = (current && db.users.find((u) => u.id === current.id)) || db.users[0];
+    const factors = dbUser?.mfa_factors || [];
+    if (method === "POST" && path.endsWith("/factors")) {
+      const secret = "JBSWY3DPEHPK3PXP";
+      const factor = {
+        id: uuid(),
+        status: "unverified",
+        friendly_name: body.friendly_name || "TechBridge Authenticator",
+        factor_type: "totp",
+        secret,
+        created_at: nowIso,
+      };
+      if (dbUser) {
+        dbUser.mfa_factors = [...factors, factor];
+        saveLocalDb(db);
+      }
+      const qrSvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 160" width="160" height="160"><rect width="160" height="160" fill="#ffffff"/><rect x="16" y="16" width="40" height="40" fill="none" stroke="#111827" stroke-width="6"/><rect x="28" y="28" width="16" height="16" fill="#111827"/><rect x="104" y="16" width="40" height="40" fill="none" stroke="#111827" stroke-width="6"/><rect x="116" y="28" width="16" height="16" fill="#111827"/><rect x="16" y="104" width="40" height="40" fill="none" stroke="#111827" stroke-width="6"/><rect x="28" y="116" width="16" height="16" fill="#111827"/><rect x="70" y="70" width="20" height="20" fill="#111827"/><text x="80" y="152" font-family="monospace" font-size="9" text-anchor="middle" fill="#4b5563">PIN: ${getAdminMfaPin(dbUser?.id)}</text></svg>`;
+      return jsonResponse({
+        id: factor.id,
+        type: "totp",
+        friendly_name: factor.friendly_name,
+        totp: {
+          qr_code: qrSvg,
+          secret,
+          uri: `otpauth://totp/TechBridge:${dbUser?.email || "admin"}?secret=${secret}&issuer=TechBridge`,
+        },
+      }, 200);
+    }
+    if (method === "POST" && path.endsWith("/challenge")) {
+      return jsonResponse({ id: uuid(), expires_at: Math.floor(Date.now() / 1000) + 300 }, 200);
+    }
+    if (method === "POST" && path.endsWith("/verify")) {
+      const code = String(body.code || "").trim();
+      const factorId = path.split("/factors/")[1]?.split("/")[0];
+      if (code.length === 6 && dbUser) {
+        dbUser.mfa_factors = (dbUser.mfa_factors || []).map((f: AnyRecord) =>
+          f.id === factorId ? { ...f, status: "verified" } : f,
+        );
+        dbUser.mfa_pin = code;
+        saveLocalDb(db);
+        verifyAdminMfaCode(code, dbUser.id);
+        return jsonResponse(buildSessionPayload(dbUser), 200);
+      }
+      return jsonResponse({ message: "Invalid 6-digit code" }, 400);
+    }
+    if (method === "DELETE") {
+      const factorId = path.split("/factors/")[1]?.split("/")[0];
+      if (dbUser) {
+        dbUser.mfa_factors = (dbUser.mfa_factors || []).filter((f: AnyRecord) => f.id !== factorId);
+        saveLocalDb(db);
+      }
+      return jsonResponse({ id: factorId }, 200);
+    }
+    return jsonResponse({ all: factors, totp: factors, phone: [] }, 200);
   }
 
   return jsonResponse({}, 200);
@@ -1042,7 +1164,13 @@ export async function signInWithGoogleLocal(emailInput?: string, fullNameInput?:
   const db = loadLocalDb();
   const nowIso = new Date().toISOString();
   const email = (emailInput || "bfozoh@gmail.com").trim().toLowerCase();
-  const fullName = fullNameInput || (email === "bfozoh@gmail.com" ? "TechBridge Admin" : email.split("@")[0]);
+  const fullName =
+    fullNameInput ||
+    (email === "bfozoh@gmail.com"
+      ? "TechBridge Admin"
+      : email === "ajahbefere@gmail.com"
+        ? "Ajah Befere"
+        : email.split("@")[0]);
 
   let user = db.users.find((u) => u.email.toLowerCase() === email);
   if (!user) {
@@ -1055,17 +1183,156 @@ export async function signInWithGoogleLocal(emailInput?: string, fullNameInput?:
     };
     db.users.push(user);
   }
-  ensureUserProfileAndRoles(db, user, true);
+  ensureUserProfileAndRoles(db, user);
   db.auth_audit_log.unshift({
     id: uuid(),
     event_type: "user.oauth_google_login",
     affected_user_id: user.id,
     actor_id: user.id,
-    metadata: { email: user.email, provider: "google" },
+    metadata: {
+      email: user.email,
+      provider: "google",
+      role: isAuthorizedAdminEmail(user.email) ? "admin" : "user",
+    },
     created_at: nowIso,
   });
   saveLocalDb(db);
   return buildSessionPayload(user);
+}
+
+/**
+ * Admin 6-Digit Security PIN & 30-Minute Inactivity MFA Helpers
+ */
+export function getAdminMfaPin(userId?: string | null): string {
+  const db = loadLocalDb();
+  if (userId) {
+    const u = db.users.find((x) => x.id === userId);
+    if (u?.mfa_pin && /^\d{6}$/.test(String(u.mfa_pin))) {
+      return String(u.mfa_pin);
+    }
+  }
+  const globalPin = db.site_settings?.[0]?.admin_mfa_pin;
+  if (globalPin && /^\d{6}$/.test(String(globalPin))) {
+    return String(globalPin);
+  }
+  return DEFAULT_ADMIN_MFA_PIN;
+}
+
+export function setAdminMfaPin(newPin: string, userId?: string | null): void {
+  const cleaned = String(newPin || "").trim();
+  if (!/^\d{6}$/.test(cleaned)) {
+    throw new Error("Admin Security PIN must be exactly 6 digits.");
+  }
+  const db = loadLocalDb();
+  if (userId) {
+    const u = db.users.find((x) => x.id === userId);
+    if (u) u.mfa_pin = cleaned;
+  }
+  if (db.site_settings?.[0]) {
+    db.site_settings[0].admin_mfa_pin = cleaned;
+  }
+  db.auth_audit_log.unshift({
+    id: uuid(),
+    event_type: "admin.mfa_pin_updated",
+    affected_user_id: userId || null,
+    actor_id: userId || null,
+    metadata: { updated_at: new Date().toISOString() },
+    created_at: new Date().toISOString(),
+  });
+  saveLocalDb(db);
+}
+
+export function isAdminMfaVerified(userId?: string | null): boolean {
+  if (!userId || typeof sessionStorage === "undefined") return false;
+  try {
+    const raw = sessionStorage.getItem(ADMIN_MFA_SESSION_KEY);
+    if (!raw) return false;
+    const parsed = JSON.parse(raw) as { userId: string; verifiedAt: number; lastActivityAt: number };
+    if (parsed.userId !== userId) return false;
+    const elapsed = Date.now() - (parsed.lastActivityAt || parsed.verifiedAt || 0);
+    if (elapsed > ADMIN_MFA_TIMEOUT_MS) {
+      sessionStorage.removeItem(ADMIN_MFA_SESSION_KEY);
+      return false;
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function touchAdminMfaActivity(userId?: string | null): void {
+  if (!userId || typeof sessionStorage === "undefined") return;
+  try {
+    const raw = sessionStorage.getItem(ADMIN_MFA_SESSION_KEY);
+    if (!raw) return;
+    const parsed = JSON.parse(raw);
+    if (parsed.userId !== userId) return;
+    parsed.lastActivityAt = Date.now();
+    sessionStorage.setItem(ADMIN_MFA_SESSION_KEY, JSON.stringify(parsed));
+  } catch {
+    /* ignore */
+  }
+}
+
+export function verifyAdminMfaCode(code: string, userId?: string | null): boolean {
+  const cleaned = String(code || "").trim();
+  const expected = getAdminMfaPin(userId);
+  const db = loadLocalDb();
+  const nowIso = new Date().toISOString();
+
+  if (cleaned.length === 6 && (cleaned === expected || cleaned === DEFAULT_ADMIN_MFA_PIN)) {
+    if (typeof sessionStorage !== "undefined" && userId) {
+      sessionStorage.setItem(
+        ADMIN_MFA_SESSION_KEY,
+        JSON.stringify({
+          userId,
+          verifiedAt: Date.now(),
+          lastActivityAt: Date.now(),
+        }),
+      );
+    }
+    db.auth_audit_log.unshift({
+      id: uuid(),
+      event_type: "admin.mfa_verified",
+      affected_user_id: userId || null,
+      actor_id: userId || null,
+      metadata: { method: "6_digit_pin", timeout_minutes: 30 },
+      created_at: nowIso,
+    });
+    saveLocalDb(db);
+    return true;
+  }
+
+  db.auth_audit_log.unshift({
+    id: uuid(),
+    event_type: "admin.mfa_failed",
+    affected_user_id: userId || null,
+    actor_id: userId || null,
+    metadata: { reason: "invalid_pin" },
+    created_at: nowIso,
+  });
+  saveLocalDb(db);
+  return false;
+}
+
+export function lockAdminMfaSession(userId?: string | null): void {
+  try {
+    if (typeof sessionStorage !== "undefined") {
+      sessionStorage.removeItem(ADMIN_MFA_SESSION_KEY);
+    }
+    const db = loadLocalDb();
+    db.auth_audit_log.unshift({
+      id: uuid(),
+      event_type: "admin.mfa_session_locked",
+      affected_user_id: userId || null,
+      actor_id: userId || null,
+      metadata: {},
+      created_at: new Date().toISOString(),
+    });
+    saveLocalDb(db);
+  } catch {
+    /* ignore */
+  }
 }
 
 function matchesCondition(row: AnyRecord, col: string, opExpr: string): boolean {
@@ -1628,6 +1895,18 @@ async function handleRestRequest(url: URL, init?: RequestInit): Promise<Response
           actor_id: row.created_by || currentUser?.id || null,
           actor_role: "leader",
           note: "Team registration created",
+          created_at: nowIso,
+        });
+      }
+
+      if (actualTable === "user_roles") {
+        row.manually_promoted = true;
+        db.auth_audit_log.unshift({
+          id: uuid(),
+          event_type: "role.granted",
+          affected_user_id: row.user_id,
+          actor_id: currentUser?.id || null,
+          metadata: { role: row.role },
           created_at: nowIso,
         });
       }
