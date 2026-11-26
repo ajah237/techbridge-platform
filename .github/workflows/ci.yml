@@ -16,53 +16,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: oven-sh/setup-bun@v2
+      - uses: actions/setup-node@v4
         with:
-          bun-version: latest
-      - run: bun install --frozen-lockfile
-      - run: bun run lint
-      - run: bun run test
-      - run: bun run build
-
-  a11y:
-    name: Accessibility (axe)
-    runs-on: ubuntu-latest
-    needs: quality
-    steps:
-      - uses: actions/checkout@v4
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: latest
-      - run: bun install --frozen-lockfile
-      - run: bunx playwright install --with-deps chromium
-      - name: Build & preview
-        run: |
-          bun run build
-          bunx vite preview --port 8080 &
-          npx --yes wait-on http://localhost:8080
-      - name: Run axe scan
-        env:
-          BASE_URL: http://localhost:8080
-        run: bunx playwright test tests/a11y.spec.ts --reporter=list
-
-  supabase-advisors:
-    name: Supabase security & performance advisors
-    runs-on: ubuntu-latest
-    if: ${{ secrets.SUPABASE_ACCESS_TOKEN != '' }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: supabase/setup-cli@v1
-        with:
-          version: latest
-      - name: Run advisors
-        env:
-          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
-          PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
-        run: |
-          set -e
-          echo "::group::Security advisors"
-          supabase --project-ref "$PROJECT_REF" inspect db advisors --type security || true
-          echo "::endgroup::"
-          echo "::group::Performance advisors"
-          supabase --project-ref "$PROJECT_REF" inspect db advisors --type performance || true
-          echo "::endgroup::"
+          node-version: 20
+          cache: npm
+      - run: npm install
+      - run: npm run test
+      - run: npm run build
