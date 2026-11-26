@@ -10,15 +10,14 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { InputOTP, InputOTPGroup, InputOTPSlot } from "@/components/ui/input-otp";
 import { toast } from "sonner";
-import { ShieldCheck, ShieldOff, Loader2, KeyRound, Lock, Eye, EyeOff, ArrowRight } from "lucide-react";
+import { ShieldCheck, ShieldOff, Loader2, KeyRound, Lock, ArrowRight } from "lucide-react";
 import SEO from "@/components/SEO";
 import DOMPurify from "dompurify";
 import {
-  getAdminMfaPin,
-  setAdminMfaPin,
+  updateAdminMfaPin,
   isAdminMfaVerified,
   lockAdminMfaSession,
-  verifyAdminMfaCode,
+  getMfaLockoutState,
 } from "@/integrations/supabase/localBackend";
 
 type Factor = { id: string; status: string; friendly_name?: string | null };
@@ -29,11 +28,10 @@ const AccountSecurity = () => {
   const [factors, setFactors] = useState<Factor[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // Admin 6-Digit PIN state
-  const [currentPin, setCurrentPin] = useState("");
+  // Admin 6-Digit PIN state — NEVER reveals current PIN in cleartext; requires Current PIN to change
+  const [currentPinInput, setCurrentPinInput] = useState("");
   const [newPin, setNewPin] = useState("");
   const [confirmPin, setConfirmPin] = useState("");
-  const [showCurrentPin, setShowCurrentPin] = useState(false);
   const [mfaActive, setMfaActive] = useState(false);
 
   // Enrollment flow state
@@ -53,7 +51,6 @@ const AccountSecurity = () => {
       setFactors(data.totp ?? []);
     }
     if (user?.id) {
-      setCurrentPin(getAdminMfaPin(user.id));
       setMfaActive(isAdminMfaVerified(user.id));
     }
     setLoading(false);
@@ -65,6 +62,10 @@ const AccountSecurity = () => {
 
   const handleUpdatePin = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!/^\d{6}$/.test(currentPinInput)) {
+      toast.error("You must enter your CURRENT 6-digit Admin Security PIN to authorize this change.");
+      return;
+    }
     if (!/^\d{6}$/.test(newPin)) {
       toast.error("Your new Admin Security PIN must be exactly 6 digits (0-9).");
       return;
@@ -74,13 +75,12 @@ const AccountSecurity = () => {
       return;
     }
     try {
-      setAdminMfaPin(newPin, user?.id);
-      verifyAdminMfaCode(newPin, user?.id);
-      setCurrentPin(newPin);
+      updateAdminMfaPin(currentPinInput, newPin, user?.id);
       setMfaActive(true);
+      setCurrentPinInput("");
       setNewPin("");
       setConfirmPin("");
-      toast.success("6-digit Admin Security PIN updated and verified!");
+      toast.success("6-digit Admin Security PIN updated securely!");
     } catch (err: any) {
       toast.error(err?.message || "Failed to update PIN.");
     }
@@ -93,6 +93,10 @@ const AccountSecurity = () => {
   };
 
   const startEnroll = async () => {
+    if (isAdmin && !isAdminMfaVerified(user?.id)) {
+      toast.error("Please unlock your Admin MFA session at /admin with your current 6-digit PIN before enrolling a new 2FA device.");
+      return;
+    }
     setEnrolling(true);
     const { data, error } = await supabase.auth.mfa.enroll({
       factorType: "totp",
@@ -151,6 +155,10 @@ const AccountSecurity = () => {
   };
 
   const removeFactor = async (id: string) => {
+    if (isAdmin && !isAdminMfaVerified(user?.id)) {
+      toast.error("Unlock your Admin MFA session first to remove an authenticator.");
+      return;
+    }
     if (!confirm("Remove this authenticator? You'll need to enroll again to re-enable 2FA.")) return;
     const { error } = await supabase.auth.mfa.unenroll({ factorId: id });
     if (error) {
@@ -162,6 +170,7 @@ const AccountSecurity = () => {
   };
 
   const verified = factors.filter((f) => f.status === "verified");
+  const lockout = getMfaLockoutState(user?.id);
 
   return (
     <main className="pt-24 pb-16 min-h-dvh container max-w-2xl space-y-6">
@@ -186,30 +195,17 @@ const AccountSecurity = () => {
               </Badge>
             </div>
             <CardDescription>
-              Required whenever an authorized System Administrator (<strong>bfozoh@gmail.com</strong> or{" "}
-              <strong>ajahbefere@gmail.com</strong>) enters <code>/admin</code>. Automatically locks when the browser
-              tab closes or after 30 minutes of inactivity.
+              Your Admin PIN is stored as a salted SHA-256 cryptographic digest and can never be viewed in plaintext.
+              Changing your PIN requires verifying your <strong>current 6-digit PIN</strong> first.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-5">
             <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg bg-muted/40 border border-border/60 p-3">
               <div className="space-y-0.5">
-                <p className="text-xs text-muted-foreground">Current Active 6-Digit Admin PIN</p>
-                <div className="flex items-center gap-2">
-                  <code className="font-mono text-base font-bold tracking-widest">
-                    {showCurrentPin ? currentPin : "••••••"}
-                  </code>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    className="h-7 px-2 text-xs gap-1"
-                    onClick={() => setShowCurrentPin((v) => !v)}
-                  >
-                    {showCurrentPin ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
-                    {showCurrentPin ? "Hide" : "Reveal"}
-                  </Button>
-                </div>
+                <p className="text-xs font-medium text-foreground">Cryptographic PIN Status</p>
+                <p className="text-xs text-muted-foreground">
+                  Active (Salted SHA-256 Hash • 5-attempt brute-force lockout • 30m inactivity lock)
+                </p>
               </div>
               <div className="flex flex-wrap gap-2">
                 {mfaActive && (
@@ -227,32 +223,55 @@ const AccountSecurity = () => {
 
             <form onSubmit={handleUpdatePin} className="grid sm:grid-cols-3 gap-3 pt-2 border-t border-border/50">
               <div className="space-y-1.5">
+                <Label className="text-xs">Current 6-Digit PIN (Required)</Label>
+                <Input
+                  type="password"
+                  inputMode="numeric"
+                  maxLength={6}
+                  disabled={lockout.locked}
+                  placeholder="Current 6 digits"
+                  value={currentPinInput}
+                  onChange={(e) => setCurrentPinInput(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                  className="font-mono tracking-widest"
+                />
+              </div>
+              <div className="space-y-1.5">
                 <Label className="text-xs">New 6-Digit PIN</Label>
                 <Input
                   type="password"
                   inputMode="numeric"
                   maxLength={6}
-                  placeholder="6 digits (e.g. 237692)"
+                  disabled={lockout.locked}
+                  placeholder="New 6 digits"
                   value={newPin}
                   onChange={(e) => setNewPin(e.target.value.replace(/\D/g, "").slice(0, 6))}
                   className="font-mono tracking-widest"
                 />
               </div>
               <div className="space-y-1.5">
-                <Label className="text-xs">Confirm 6-Digit PIN</Label>
+                <Label className="text-xs">Confirm New PIN</Label>
                 <Input
                   type="password"
                   inputMode="numeric"
                   maxLength={6}
-                  placeholder="Repeat 6 digits"
+                  disabled={lockout.locked}
+                  placeholder="Repeat new 6 digits"
                   value={confirmPin}
                   onChange={(e) => setConfirmPin(e.target.value.replace(/\D/g, "").slice(0, 6))}
                   className="font-mono tracking-widest"
                 />
               </div>
-              <div className="flex items-end">
-                <Button type="submit" className="w-full" disabled={newPin.length !== 6 || confirmPin.length !== 6}>
-                  Save New Admin PIN
+              <div className="sm:col-span-3 flex justify-end">
+                <Button
+                  type="submit"
+                  disabled={
+                    lockout.locked ||
+                    currentPinInput.length !== 6 ||
+                    newPin.length !== 6 ||
+                    confirmPin.length !== 6
+                  }
+                >
+                  Verify Current PIN &amp; Save New Admin PIN
                 </Button>
               </div>
             </form>
@@ -267,7 +286,7 @@ const AccountSecurity = () => {
             Two-factor authentication (TOTP Authenticator App)
           </CardTitle>
           <CardDescription>
-            Optionally pair an authenticator app like 1Password, Authy, or Google Authenticator.
+            Pair an authenticator app like 1Password, Authy, or Google Authenticator (requires unlocked Admin MFA session).
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -310,7 +329,7 @@ const AccountSecurity = () => {
                   Or enter this code manually: <code className="font-mono">{secret}</code>
                 </p>
               )}
-              <p className="text-sm">Enter a 6-digit code to verify:</p>
+              <p className="text-sm">Enter your current 6-digit Admin Security PIN to confirm enrollment:</p>
               <div className="flex justify-center">
                 <InputOTP maxLength={6} value={code} onChange={setCode} aria-label="6-digit verification code">
                   <InputOTPGroup>

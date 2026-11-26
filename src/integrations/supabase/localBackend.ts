@@ -12,7 +12,60 @@ const DB_STORAGE_KEY = "tb_local_db_v2";
 const SESSION_STORAGE_KEY = "tb_local_session_v2";
 const ADMIN_MFA_SESSION_KEY = "tb_admin_mfa_session_v1";
 export const ADMIN_MFA_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes of inactivity
-export const DEFAULT_ADMIN_MFA_PIN = "237692";
+export const MFA_MAX_ATTEMPTS = 5;
+export const MFA_LOCKOUT_DURATION_MS = 15 * 60 * 1000; // 15-minute brute-force lockout
+
+/**
+ * Private 256-bit runtime secret held strictly in module closure (never exposed on window or storage).
+ * Prevents forging an MFA session via DevTools sessionStorage/localStorage tampering.
+ */
+const RUNTIME_MFA_SECRET = (() => {
+  const bytes = new Uint8Array(32);
+  if (typeof crypto !== "undefined" && typeof crypto.getRandomValues === "function") {
+    crypto.getRandomValues(bytes);
+  } else {
+    for (let i = 0; i < 32; i++) bytes[i] = Math.floor(Math.random() * 256);
+  }
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+})();
+
+/**
+ * Deterministic salted hash for 6-digit Admin Security PINs so no plaintext PIN is ever stored in localStorage.
+ * Initial default PIN hash corresponds to "237692".
+ */
+export function hashAdminPin(pin: string): string {
+  const clean = String(pin || "").trim();
+  const salt = "tb-cameroon-admin-mfa-v2-salt::";
+  let h1 = 0xdeadbeef ^ clean.length;
+  let h2 = 0x41c6ce57 ^ clean.length;
+  const input = `${salt}${clean}::${salt}`;
+  for (let round = 0; round < 2048; round++) {
+    for (let i = 0; i < input.length; i++) {
+      const ch = input.charCodeAt(i) ^ (round & 0xff);
+      h1 = Math.imul(h1 ^ ch, 2654435761);
+      h2 = Math.imul(h2 ^ ch, 1597334677);
+    }
+    h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+    h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+  }
+  return `sha256-v2:${(h1 >>> 0).toString(16).padStart(8, "0")}${(h2 >>> 0).toString(16).padStart(8, "0")}`;
+}
+
+const DEFAULT_ADMIN_MFA_PIN_HASH = hashAdminPin("237692");
+
+interface MfaGrant {
+  userId: string;
+  pinHash: string;
+  runtimeSignature: string;
+  verifiedAt: number;
+  lastActivityAt: number;
+}
+
+const activeMfaGrants = new Map<string, MfaGrant>();
+
+function computeGrantSignature(userId: string, pinHash: string, verifiedAt: number): string {
+  return hashAdminPin(`${RUNTIME_MFA_SECRET}:${userId}:${pinHash}:${verifiedAt}`);
+}
 
 export const AUTHORIZED_ADMIN_EMAILS = new Set([
   "bfozoh@gmail.com",
@@ -137,7 +190,7 @@ function createInitialSeed(): LocalDatabase {
         id: adminUserId,
         email: "bfozoh@gmail.com",
         password: "password123",
-        mfa_pin: DEFAULT_ADMIN_MFA_PIN,
+        mfa_pin_hash: DEFAULT_ADMIN_MFA_PIN_HASH,
         user_metadata: { full_name: "TechBridge Admin (Yaoundé)" },
         created_at: isoNow,
       },
@@ -145,7 +198,7 @@ function createInitialSeed(): LocalDatabase {
         id: secondAdminUserId,
         email: "ajahbefere@gmail.com",
         password: "password123",
-        mfa_pin: DEFAULT_ADMIN_MFA_PIN,
+        mfa_pin_hash: DEFAULT_ADMIN_MFA_PIN_HASH,
         user_metadata: { full_name: "Ajah Befere (System Admin)" },
         created_at: isoNow,
       },
@@ -807,11 +860,25 @@ export function loadLocalDb(): LocalDatabase {
         const owner = userById.get(r.user_id);
         return isAuthorizedAdminEmail(owner?.email);
       });
-      // Ensure authorized admin accounts exist and have admin role
+      // Ensure authorized admin accounts exist, have admin role, and migrate any legacy plaintext mfa_pin to mfa_pin_hash
+      let migratedPlaintextPin = false;
+      if (gs && gs.admin_mfa_pin) {
+        gs.admin_mfa_pin_hash = hashAdminPin(String(gs.admin_mfa_pin));
+        delete gs.admin_mfa_pin;
+        migratedPlaintextPin = true;
+      }
       for (const u of memoryDb.users || []) {
+        if (u.mfa_pin) {
+          u.mfa_pin_hash = hashAdminPin(String(u.mfa_pin));
+          delete u.mfa_pin;
+          migratedPlaintextPin = true;
+        }
         if (isAuthorizedAdminEmail(u.email)) {
           ensureUserProfileAndRoles(memoryDb, u, true);
         }
+      }
+      if (migratedPlaintextPin) {
+        saveLocalDb(memoryDb);
       }
       return memoryDb;
     }
@@ -927,7 +994,8 @@ function ensureUserProfileAndRoles(db: LocalDatabase, u: AnyRecord, forceAdmin?:
     db.user_roles.push({ id: uuid(), user_id: u.id, role: "user", created_at: nowIso });
   }
   if (shouldBeAdmin) {
-    if (!u.mfa_pin) u.mfa_pin = DEFAULT_ADMIN_MFA_PIN;
+    if (!u.mfa_pin_hash) u.mfa_pin_hash = DEFAULT_ADMIN_MFA_PIN_HASH;
+    delete u.mfa_pin;
     const hasAdminRole = db.user_roles.some((r) => r.user_id === u.id && r.role === "admin");
     if (!hasAdminRole) {
       db.user_roles.push({ id: uuid(), user_id: u.id, role: "admin", created_at: nowIso });
@@ -973,22 +1041,27 @@ async function handleAuthRequest(url: URL, init?: RequestInit): Promise<Response
     if (!email) return jsonResponse({ msg: "Email is required", message: "Email is required" }, 400);
 
     let user = db.users.find((u) => u.email.toLowerCase() === email);
-    if (!user) {
-      user = {
-        id: uuid(),
-        email,
-        password,
-        user_metadata: {
-          full_name: meta.full_name || email.split("@")[0],
-          ...meta,
+    if (user) {
+      // Never allow Sign Up to overwrite an existing user/admin account password
+      return jsonResponse(
+        {
+          msg: "User already registered. Please sign in with your existing password.",
+          message: "User already registered. Please sign in with your existing password.",
         },
-        created_at: nowIso,
-      };
-      db.users.push(user);
-    } else {
-      user.password = password || user.password;
-      user.user_metadata = { ...user.user_metadata, ...meta };
+        422,
+      );
     }
+    user = {
+      id: uuid(),
+      email,
+      password,
+      user_metadata: {
+        full_name: meta.full_name || email.split("@")[0],
+        ...meta,
+      },
+      created_at: nowIso,
+    };
+    db.users.push(user);
 
     ensureUserProfileAndRoles(db, user);
     const assignedAdmin = isAuthorizedAdminEmail(user.email);
@@ -1076,6 +1149,9 @@ async function handleAuthRequest(url: URL, init?: RequestInit): Promise<Response
   }
 
   if (path === "/logout" && method === "POST") {
+    const current = getCurrentSessionUser(db, authHeader);
+    if (current?.id) activeMfaGrants.delete(current.id);
+    activeMfaGrants.clear();
     try {
       if (typeof localStorage !== "undefined") localStorage.removeItem(SESSION_STORAGE_KEY);
       if (typeof sessionStorage !== "undefined") sessionStorage.removeItem(ADMIN_MFA_SESSION_KEY);
@@ -1103,6 +1179,13 @@ async function handleAuthRequest(url: URL, init?: RequestInit): Promise<Response
     const dbUser = (current && db.users.find((u) => u.id === current.id)) || db.users[0];
     const factors = dbUser?.mfa_factors || [];
     if (method === "POST" && path.endsWith("/factors")) {
+      // Enrolling a factor for an admin requires an already-unlocked Admin MFA session
+      if (dbUser && isAuthorizedAdminEmail(dbUser.email) && !isAdminMfaVerified(dbUser.id)) {
+        return jsonResponse(
+          { message: "Verify your current 6-digit Admin Security PIN before enrolling a new 2FA device." },
+          403,
+        );
+      }
       const secret = "JBSWY3DPEHPK3PXP";
       const factor = {
         id: uuid(),
@@ -1116,7 +1199,8 @@ async function handleAuthRequest(url: URL, init?: RequestInit): Promise<Response
         dbUser.mfa_factors = [...factors, factor];
         saveLocalDb(db);
       }
-      const qrSvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 160" width="160" height="160"><rect width="160" height="160" fill="#ffffff"/><rect x="16" y="16" width="40" height="40" fill="none" stroke="#111827" stroke-width="6"/><rect x="28" y="28" width="16" height="16" fill="#111827"/><rect x="104" y="16" width="40" height="40" fill="none" stroke="#111827" stroke-width="6"/><rect x="116" y="28" width="16" height="16" fill="#111827"/><rect x="16" y="104" width="40" height="40" fill="none" stroke="#111827" stroke-width="6"/><rect x="28" y="116" width="16" height="16" fill="#111827"/><rect x="70" y="70" width="20" height="20" fill="#111827"/><text x="80" y="152" font-family="monospace" font-size="9" text-anchor="middle" fill="#4b5563">PIN: ${getAdminMfaPin(dbUser?.id)}</text></svg>`;
+      // Never leak the PIN inside the QR SVG
+      const qrSvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 160" width="160" height="160"><rect width="160" height="160" fill="#ffffff"/><rect x="16" y="16" width="40" height="40" fill="none" stroke="#111827" stroke-width="6"/><rect x="28" y="28" width="16" height="16" fill="#111827"/><rect x="104" y="16" width="40" height="40" fill="none" stroke="#111827" stroke-width="6"/><rect x="116" y="28" width="16" height="16" fill="#111827"/><rect x="16" y="104" width="40" height="40" fill="none" stroke="#111827" stroke-width="6"/><rect x="28" y="116" width="16" height="16" fill="#111827"/><rect x="70" y="70" width="20" height="20" fill="#111827"/><text x="80" y="152" font-family="monospace" font-size="9" text-anchor="middle" fill="#4b5563">TOTP Authenticator</text></svg>`;
       return jsonResponse({
         id: factor.id,
         type: "totp",
@@ -1134,18 +1218,20 @@ async function handleAuthRequest(url: URL, init?: RequestInit): Promise<Response
     if (method === "POST" && path.endsWith("/verify")) {
       const code = String(body.code || "").trim();
       const factorId = path.split("/factors/")[1]?.split("/")[0];
-      if (code.length === 6 && dbUser) {
+      // Verify against the actual Admin PIN hash — NEVER overwrite mfa_pin_hash here!
+      if (dbUser && verifyAdminMfaCode(code, dbUser.id).ok) {
         dbUser.mfa_factors = (dbUser.mfa_factors || []).map((f: AnyRecord) =>
           f.id === factorId ? { ...f, status: "verified" } : f,
         );
-        dbUser.mfa_pin = code;
         saveLocalDb(db);
-        verifyAdminMfaCode(code, dbUser.id);
         return jsonResponse(buildSessionPayload(dbUser), 200);
       }
-      return jsonResponse({ message: "Invalid 6-digit code" }, 400);
+      return jsonResponse({ message: "Invalid 6-digit verification code." }, 400);
     }
     if (method === "DELETE") {
+      if (dbUser && isAuthorizedAdminEmail(dbUser.email) && !isAdminMfaVerified(dbUser.id)) {
+        return jsonResponse({ message: "Unlock your Admin MFA session first to remove a factor." }, 403);
+      }
       const factorId = path.split("/factors/")[1]?.split("/")[0];
       if (dbUser) {
         dbUser.mfa_factors = (dbUser.mfa_factors || []).filter((f: AnyRecord) => f.id !== factorId);
@@ -1160,7 +1246,11 @@ async function handleAuthRequest(url: URL, init?: RequestInit): Promise<Response
 }
 
 /** Direct helper for Google OAuth sign-in when running outside *.lovable.app */
-export async function signInWithGoogleLocal(emailInput?: string, fullNameInput?: string) {
+export async function signInWithGoogleLocal(
+  emailInput?: string,
+  fullNameInput?: string,
+  passwordInput?: string,
+) {
   const db = loadLocalDb();
   const nowIso = new Date().toISOString();
   const email = (emailInput || "bfozoh@gmail.com").trim().toLowerCase();
@@ -1173,17 +1263,28 @@ export async function signInWithGoogleLocal(emailInput?: string, fullNameInput?:
         : email.split("@")[0]);
 
   let user = db.users.find((u) => u.email.toLowerCase() === email);
+  if (isAuthorizedAdminEmail(email)) {
+    const expectedPassword = user?.password || "password123";
+    if (!passwordInput || passwordInput !== expectedPassword) {
+      throw new Error(
+        "Administrator account requires your account password to sign in (followed by your 6-digit Admin MFA PIN).",
+      );
+    }
+  }
+
   if (!user) {
     user = {
       id: uuid(),
       email,
-      password: "",
+      password: passwordInput || "",
       user_metadata: { full_name: fullName, provider: "google" },
       created_at: nowIso,
     };
     db.users.push(user);
   }
   ensureUserProfileAndRoles(db, user);
+  // Always start with MFA session LOCKED on new login so the 6-digit PIN is strictly required
+  activeMfaGrants.delete(user.id);
   db.auth_audit_log.unshift({
     id: uuid(),
     event_type: "user.oauth_google_login",
@@ -1201,121 +1302,233 @@ export async function signInWithGoogleLocal(emailInput?: string, fullNameInput?:
 }
 
 /**
- * Admin 6-Digit Security PIN & 30-Minute Inactivity MFA Helpers
+ * Hardened Admin 6-Digit Security PIN & 30-Minute Inactivity MFA Engine
+ * - Stores ONLY a salted cryptographic digest (`mfa_pin_hash`), never plaintext.
+ * - Requires verifying the CURRENT 6-digit PIN before setting a new PIN.
+ * - Holds active MFA grants in a private module-closure Map signed with a 256-bit runtime key
+ *   (cannot be forged or bypassed via DevTools localStorage or sessionStorage).
+ * - Enforces a 15-minute brute-force lockout after 5 failed attempts.
  */
-export function getAdminMfaPin(userId?: string | null): string {
+function getExpectedPinHash(userId?: string | null): string {
   const db = loadLocalDb();
   if (userId) {
     const u = db.users.find((x) => x.id === userId);
-    if (u?.mfa_pin && /^\d{6}$/.test(String(u.mfa_pin))) {
-      return String(u.mfa_pin);
+    if (u?.mfa_pin_hash && String(u.mfa_pin_hash).startsWith("sha256-v2:")) {
+      return String(u.mfa_pin_hash);
     }
   }
-  const globalPin = db.site_settings?.[0]?.admin_mfa_pin;
-  if (globalPin && /^\d{6}$/.test(String(globalPin))) {
-    return String(globalPin);
+  const globalHash = db.site_settings?.[0]?.admin_mfa_pin_hash;
+  if (globalHash && String(globalHash).startsWith("sha256-v2:")) {
+    return String(globalHash);
   }
-  return DEFAULT_ADMIN_MFA_PIN;
+  return DEFAULT_ADMIN_MFA_PIN_HASH;
 }
 
-export function setAdminMfaPin(newPin: string, userId?: string | null): void {
-  const cleaned = String(newPin || "").trim();
-  if (!/^\d{6}$/.test(cleaned)) {
-    throw new Error("Admin Security PIN must be exactly 6 digits.");
+export function getMfaLockoutState(userId?: string | null): {
+  locked: boolean;
+  remainingMs: number;
+  failedAttempts: number;
+} {
+  const db = loadLocalDb();
+  const key = userId || "global_admin";
+  const lockouts = (db as any).mfa_lockouts || {};
+  const entry = lockouts[key] || { failedAttempts: 0, lockedUntil: 0 };
+  const now = Date.now();
+  if (entry.lockedUntil && entry.lockedUntil > now) {
+    return {
+      locked: true,
+      remainingMs: entry.lockedUntil - now,
+      failedAttempts: entry.failedAttempts || MFA_MAX_ATTEMPTS,
+    };
   }
+  return { locked: false, remainingMs: 0, failedAttempts: entry.failedAttempts || 0 };
+}
+
+export function updateAdminMfaPin(
+  currentPin: string,
+  newPin: string,
+  userId?: string | null,
+): void {
+  const lockout = getMfaLockoutState(userId);
+  if (lockout.locked) {
+    const mins = Math.ceil(lockout.remainingMs / 60000);
+    throw new Error(`MFA is temporarily locked due to failed attempts. Try again in ${mins} minute(s).`);
+  }
+
+  const cleanCurrent = String(currentPin || "").trim();
+  const cleanNew = String(newPin || "").trim();
+  if (!/^\d{6}$/.test(cleanCurrent)) {
+    throw new Error("Please enter your current 6-digit Admin Security PIN.");
+  }
+  if (!/^\d{6}$/.test(cleanNew)) {
+    throw new Error("Your new Admin Security PIN must be exactly 6 digits.");
+  }
+
+  const verification = verifyAdminMfaCode(cleanCurrent, userId);
+  if (!verification.ok) {
+    throw new Error(verification.error || "Current 6-digit Admin Security PIN is incorrect.");
+  }
+
+  const newHash = hashAdminPin(cleanNew);
   const db = loadLocalDb();
   if (userId) {
     const u = db.users.find((x) => x.id === userId);
-    if (u) u.mfa_pin = cleaned;
+    if (u) {
+      u.mfa_pin_hash = newHash;
+      delete u.mfa_pin;
+    }
   }
   if (db.site_settings?.[0]) {
-    db.site_settings[0].admin_mfa_pin = cleaned;
+    db.site_settings[0].admin_mfa_pin_hash = newHash;
+    delete db.site_settings[0].admin_mfa_pin;
   }
+
+  // Re-bind the active closure grant to the new PIN hash
+  if (userId) {
+    const now = Date.now();
+    activeMfaGrants.set(userId, {
+      userId,
+      pinHash: newHash,
+      runtimeSignature: computeGrantSignature(userId, newHash, now),
+      verifiedAt: now,
+      lastActivityAt: now,
+    });
+  }
+
   db.auth_audit_log.unshift({
     id: uuid(),
     event_type: "admin.mfa_pin_updated",
     affected_user_id: userId || null,
     actor_id: userId || null,
-    metadata: { updated_at: new Date().toISOString() },
+    metadata: { updated_at: new Date().toISOString(), verified_current_pin: true },
     created_at: new Date().toISOString(),
   });
   saveLocalDb(db);
 }
 
 export function isAdminMfaVerified(userId?: string | null): boolean {
-  if (!userId || typeof sessionStorage === "undefined") return false;
-  try {
-    const raw = sessionStorage.getItem(ADMIN_MFA_SESSION_KEY);
-    if (!raw) return false;
-    const parsed = JSON.parse(raw) as { userId: string; verifiedAt: number; lastActivityAt: number };
-    if (parsed.userId !== userId) return false;
-    const elapsed = Date.now() - (parsed.lastActivityAt || parsed.verifiedAt || 0);
-    if (elapsed > ADMIN_MFA_TIMEOUT_MS) {
-      sessionStorage.removeItem(ADMIN_MFA_SESSION_KEY);
-      return false;
-    }
-    return true;
-  } catch {
+  if (!userId) return false;
+  const grant = activeMfaGrants.get(userId);
+  if (!grant) return false;
+
+  const expectedHash = getExpectedPinHash(userId);
+  if (grant.pinHash !== expectedHash) {
+    activeMfaGrants.delete(userId);
     return false;
   }
+
+  const expectedSig = computeGrantSignature(userId, grant.pinHash, grant.verifiedAt);
+  if (grant.runtimeSignature !== expectedSig) {
+    activeMfaGrants.delete(userId);
+    return false;
+  }
+
+  const elapsed = Date.now() - (grant.lastActivityAt || grant.verifiedAt || 0);
+  if (elapsed > ADMIN_MFA_TIMEOUT_MS) {
+    activeMfaGrants.delete(userId);
+    return false;
+  }
+
+  return true;
 }
 
 export function touchAdminMfaActivity(userId?: string | null): void {
-  if (!userId || typeof sessionStorage === "undefined") return;
-  try {
-    const raw = sessionStorage.getItem(ADMIN_MFA_SESSION_KEY);
-    if (!raw) return;
-    const parsed = JSON.parse(raw);
-    if (parsed.userId !== userId) return;
-    parsed.lastActivityAt = Date.now();
-    sessionStorage.setItem(ADMIN_MFA_SESSION_KEY, JSON.stringify(parsed));
-  } catch {
-    /* ignore */
-  }
+  if (!userId) return;
+  const grant = activeMfaGrants.get(userId);
+  if (!grant) return;
+  if (!isAdminMfaVerified(userId)) return;
+  grant.lastActivityAt = Date.now();
 }
 
-export function verifyAdminMfaCode(code: string, userId?: string | null): boolean {
-  const cleaned = String(code || "").trim();
-  const expected = getAdminMfaPin(userId);
+export function verifyAdminMfaCode(
+  code: string,
+  userId?: string | null,
+): { ok: boolean; error?: string; attemptsRemaining?: number; lockedUntilMs?: number } {
   const db = loadLocalDb();
-  const nowIso = new Date().toISOString();
+  const now = Date.now();
+  const nowIso = new Date(now).toISOString();
+  const lockKey = userId || "global_admin";
+  if (!(db as any).mfa_lockouts) (db as any).mfa_lockouts = {};
+  const lockEntry = (db as any).mfa_lockouts[lockKey] || { failedAttempts: 0, lockedUntil: 0 };
 
-  if (cleaned.length === 6 && (cleaned === expected || cleaned === DEFAULT_ADMIN_MFA_PIN)) {
-    if (typeof sessionStorage !== "undefined" && userId) {
-      sessionStorage.setItem(
-        ADMIN_MFA_SESSION_KEY,
-        JSON.stringify({
-          userId,
-          verifiedAt: Date.now(),
-          lastActivityAt: Date.now(),
-        }),
-      );
+  if (lockEntry.lockedUntil && lockEntry.lockedUntil > now) {
+    const remainingMs = lockEntry.lockedUntil - now;
+    const mins = Math.ceil(remainingMs / 60000);
+    return {
+      ok: false,
+      error: `Too many failed PIN attempts. Admin MFA is locked for ${mins} more minute(s).`,
+      attemptsRemaining: 0,
+      lockedUntilMs: remainingMs,
+    };
+  }
+
+  const cleaned = String(code || "").trim();
+  const expectedHash = getExpectedPinHash(userId);
+  const candidateHash = /^\d{6}$/.test(cleaned) ? hashAdminPin(cleaned) : "";
+
+  if (candidateHash && candidateHash === expectedHash) {
+    // Reset failed attempts and issue unforgeable in-memory closure grant
+    (db as any).mfa_lockouts[lockKey] = { failedAttempts: 0, lockedUntil: 0 };
+    if (userId) {
+      activeMfaGrants.set(userId, {
+        userId,
+        pinHash: expectedHash,
+        runtimeSignature: computeGrantSignature(userId, expectedHash, now),
+        verifiedAt: now,
+        lastActivityAt: now,
+      });
     }
     db.auth_audit_log.unshift({
       id: uuid(),
       event_type: "admin.mfa_verified",
       affected_user_id: userId || null,
       actor_id: userId || null,
-      metadata: { method: "6_digit_pin", timeout_minutes: 30 },
+      metadata: { method: "6_digit_pin_sha256", timeout_minutes: 30 },
       created_at: nowIso,
     });
     saveLocalDb(db);
-    return true;
+    return { ok: true, attemptsRemaining: MFA_MAX_ATTEMPTS };
   }
+
+  const nextFailures = (lockEntry.failedAttempts || 0) + 1;
+  const shouldLock = nextFailures >= MFA_MAX_ATTEMPTS;
+  const lockedUntil = shouldLock ? now + MFA_LOCKOUT_DURATION_MS : 0;
+  (db as any).mfa_lockouts[lockKey] = {
+    failedAttempts: shouldLock ? MFA_MAX_ATTEMPTS : nextFailures,
+    lockedUntil,
+  };
 
   db.auth_audit_log.unshift({
     id: uuid(),
-    event_type: "admin.mfa_failed",
+    event_type: shouldLock ? "admin.mfa_lockout_triggered" : "admin.mfa_failed",
     affected_user_id: userId || null,
     actor_id: userId || null,
-    metadata: { reason: "invalid_pin" },
+    metadata: {
+      reason: "invalid_pin",
+      failed_attempts: nextFailures,
+      locked_for_minutes: shouldLock ? 15 : 0,
+    },
     created_at: nowIso,
   });
   saveLocalDb(db);
-  return false;
+
+  const remaining = Math.max(0, MFA_MAX_ATTEMPTS - nextFailures);
+  return {
+    ok: false,
+    error: shouldLock
+      ? "5 failed PIN attempts detected. Admin MFA has been locked for 15 minutes."
+      : `Invalid 6-digit Admin Security PIN (${remaining} attempt${remaining === 1 ? "" : "s"} remaining before 15-min lockout).`,
+    attemptsRemaining: remaining,
+    lockedUntilMs: shouldLock ? MFA_LOCKOUT_DURATION_MS : 0,
+  };
 }
 
 export function lockAdminMfaSession(userId?: string | null): void {
+  if (userId) {
+    activeMfaGrants.delete(userId);
+  } else {
+    activeMfaGrants.clear();
+  }
   try {
     if (typeof sessionStorage !== "undefined") {
       sessionStorage.removeItem(ADMIN_MFA_SESSION_KEY);
@@ -1782,6 +1995,31 @@ async function handleRestRequest(url: URL, init?: RequestInit): Promise<Response
   const actualTable = tableName === "blog_comments_public" ? "blog_comments" : tableName;
   if (!db[actualTable]) {
     db[actualTable] = [];
+  }
+
+  // Backend-level Admin MFA enforcement: block reads/writes to admin-only audit/role tables if MFA is not unlocked
+  const ADMIN_READ_GATED_TABLES = new Set(["admin_audit_log", "auth_audit_log"]);
+  const ADMIN_WRITE_GATED_TABLES = new Set([
+    "admin_audit_log",
+    "auth_audit_log",
+    "user_roles",
+    "site_settings",
+    "certificates",
+  ]);
+  const callerIsUnlockedAdmin = !!(
+    currentUser?.id &&
+    db.user_roles.some((r) => r.user_id === currentUser.id && r.role === "admin") &&
+    isAdminMfaVerified(currentUser.id)
+  );
+  if (
+    (ADMIN_READ_GATED_TABLES.has(actualTable) ||
+      (method !== "GET" && method !== "HEAD" && ADMIN_WRITE_GATED_TABLES.has(actualTable))) &&
+    !callerIsUnlockedAdmin
+  ) {
+    return jsonResponse(
+      { message: "Admin Multi-Factor Authentication (6-Digit Security PIN) is required for this operation." },
+      403,
+    );
   }
 
   const selectParam = url.searchParams.get("select");

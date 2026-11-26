@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
-import { signInWithGoogleLocal } from "@/integrations/supabase/localBackend";
+import { isAuthorizedAdminEmail, signInWithGoogleLocal } from "@/integrations/supabase/localBackend";
 import { lovable } from "@/integrations/lovable/index";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -22,6 +22,7 @@ const Auth = () => {
   const [googleDialogOpen, setGoogleDialogOpen] = useState(false);
   const [googleEmail, setGoogleEmail] = useState("bfozoh@gmail.com");
   const [googleName, setGoogleName] = useState("TechBridge Admin");
+  const [googlePassword, setGooglePassword] = useState("");
   const navigate = useNavigate();
   const [params] = useSearchParams();
 
@@ -124,14 +125,28 @@ const Auth = () => {
       toast.error("Please enter a valid Google email address.");
       return;
     }
+    const needsAdminPassword = isAuthorizedAdminEmail(targetEmail);
+    if (needsAdminPassword && !googlePassword) {
+      toast.error("Administrator email detected: please enter your account password.");
+      return;
+    }
     setLoading(true);
     try {
-      await signInWithGoogleLocal(targetEmail, googleName.trim() || targetEmail.split("@")[0]);
-      await supabase.auth.signInWithPassword({
+      await signInWithGoogleLocal(
+        targetEmail,
+        googleName.trim() || targetEmail.split("@")[0],
+        needsAdminPassword ? googlePassword : "",
+      );
+      const { error } = await supabase.auth.signInWithPassword({
         email: targetEmail,
-        password: "",
+        password: needsAdminPassword ? googlePassword : "",
       });
+      if (error) {
+        toast.error(error.message);
+        return;
+      }
       setGoogleDialogOpen(false);
+      setGooglePassword("");
       toast.success(`Signed in with Google as ${targetEmail}`);
       navigate(redirectTarget);
     } catch (err) {
@@ -280,6 +295,17 @@ const Auth = () => {
                 onChange={(e) => setGoogleName(e.target.value)}
                 className="w-full px-3 py-2 rounded-md border border-border bg-background text-foreground text-xs"
               />
+              {isAuthorizedAdminEmail(googleEmail) && (
+                <input
+                  required
+                  type="password"
+                  placeholder="Admin Account Password (required for admin emails)"
+                  aria-label="Admin Account Password"
+                  value={googlePassword}
+                  onChange={(e) => setGooglePassword(e.target.value)}
+                  className="w-full px-3 py-2 rounded-md border border-primary/50 bg-background text-foreground text-xs"
+                />
+              )}
               <Button type="submit" size="sm" className="w-full bg-gradient-primary text-primary-foreground">
                 Sign in with Google
               </Button>

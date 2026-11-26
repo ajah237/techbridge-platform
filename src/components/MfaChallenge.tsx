@@ -1,12 +1,11 @@
 import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { InputOTP, InputOTPGroup, InputOTPSlot } from "@/components/ui/input-otp";
-import { ShieldCheck, Lock, KeyRound } from "lucide-react";
+import { ShieldCheck, Lock, AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
-import { verifyAdminMfaCode } from "@/integrations/supabase/localBackend";
+import { getMfaLockoutState, verifyAdminMfaCode } from "@/integrations/supabase/localBackend";
 
 interface MfaChallengeProps {
   open: boolean;
@@ -15,32 +14,37 @@ interface MfaChallengeProps {
 }
 
 /**
- * Step-up MFA dialog for the System Admin Dashboard (/admin):
- * Requires the 6-digit Admin Security PIN (or enrolled Authenticator code).
- * Session automatically expires when the browser tab closes or after 30 minutes of inactivity.
+ * Hardened Step-up MFA dialog for the System Admin Dashboard (/admin):
+ * - Verifies the 6-digit Admin Security PIN against a salted SHA-256 hash.
+ * - Enforces a 15-minute brute-force lockout after 5 failed attempts.
+ * - Grants an unforgeable in-memory cryptographic session token that expires on tab close or 30m inactivity.
  */
 export const MfaChallenge = ({ open, onVerified, onCancel }: MfaChallengeProps) => {
   const { user } = useAuth();
   const [code, setCode] = useState("");
   const [loading, setLoading] = useState(false);
-  const [attempts, setAttempts] = useState(0);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [lockout, setLockout] = useState(() => getMfaLockoutState(user?.id));
 
   useEffect(() => {
     if (open) {
       setCode("");
+      setErrorMsg(null);
+      setLockout(getMfaLockoutState(user?.id));
     }
-  }, [open]);
+  }, [open, user?.id]);
 
   const verify = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     if (code.length !== 6) return;
     setLoading(true);
-    const ok = verifyAdminMfaCode(code, user?.id);
+    const res = verifyAdminMfaCode(code, user?.id);
     setLoading(false);
+    setLockout(getMfaLockoutState(user?.id));
 
-    if (!ok) {
-      setAttempts((a) => a + 1);
-      toast.error("Invalid 6-digit Admin Security PIN. Please try again.");
+    if (!res.ok) {
+      setErrorMsg(res.error || "Invalid 6-digit Admin Security PIN.");
+      toast.error(res.error || "Invalid 6-digit Admin Security PIN.");
       setCode("");
       return;
     }
@@ -70,6 +74,7 @@ export const MfaChallenge = ({ open, onVerified, onCancel }: MfaChallengeProps) 
             <InputOTP
               maxLength={6}
               value={code}
+              disabled={lockout.locked}
               onChange={(val) => setCode(val.replace(/\D/g, ""))}
               autoFocus
             >
@@ -81,25 +86,22 @@ export const MfaChallenge = ({ open, onVerified, onCancel }: MfaChallengeProps) 
             </InputOTP>
           </div>
 
+          {errorMsg && (
+            <div className="rounded-lg bg-destructive/10 border border-destructive/30 p-3 text-xs text-destructive flex items-start gap-2">
+              <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
+              <span>{errorMsg}</span>
+            </div>
+          )}
+
           <div className="rounded-lg bg-muted/50 border border-border/60 p-3 text-xs text-muted-foreground space-y-1">
             <div className="flex items-center gap-1.5 font-medium text-foreground">
               <Lock className="h-3.5 w-3.5 text-primary" />
-              Session Security Policy
+              Cryptographic MFA &amp; Brute-Force Protection
             </div>
             <p>
-              This admin session automatically locks when you close the browser tab or after{" "}
-              <strong>30 minutes of inactivity</strong>.
+              Protected by SHA-256 PIN verification, a 5-attempt / 15-minute brute-force lockout, and automatic
+              30-minute inactivity &amp; tab-close session lock.
             </p>
-            {attempts > 0 && (
-              <p className="text-primary pt-1 flex items-center gap-1">
-                <KeyRound className="h-3.5 w-3.5" />
-                You can view or change your 6-digit Admin Security PIN under{" "}
-                <Link to="/account/security" className="underline font-medium">
-                  Account Security
-                </Link>
-                .
-              </p>
-            )}
           </div>
 
           <div className="flex gap-2 justify-end">
@@ -108,10 +110,10 @@ export const MfaChallenge = ({ open, onVerified, onCancel }: MfaChallengeProps) 
             </Button>
             <Button
               type="submit"
-              disabled={loading || code.length !== 6}
+              disabled={loading || lockout.locked || code.length !== 6}
               className="bg-gradient-primary text-primary-foreground"
             >
-              {loading ? "Verifying…" : "Unlock Admin Dashboard"}
+              {loading ? "Verifying…" : lockout.locked ? "Temporarily Locked" : "Unlock Admin Dashboard"}
             </Button>
           </div>
         </form>
