@@ -1,0 +1,23 @@
+# TechBridge
+
+> Tech NGO empowering innovators through hackathons, bootcamps, internships, mentorship, and digital skills training across 45+ countries.
+
+TechBridge runs hands-on programs, a public events calendar, a blog, mentor directory, project showcase, community forum, and a verifiable certificate system.
+
+## Pages
+- [Home](/): Overview of programs, impact, and featured events
+- [About](/about): Mission, vision, leadership, and impact numbers
+- [Programs](/programs): Hackathons, bootcamps, internships, workshops
+- [Events](/events): Upcoming and past events with registration
+- [Services](/services): Software, web, mobile, training, and hackathon services
+- [Mentors](/mentors): Browse mentors and request 1:1 mentorship
+- [Projects](/projects): Community project showcase
+- [Blog](/blog): Articles, case studies, and announcements
+- [Forum](/forum): Community discussions
+- [Verify Certificate](/verify): Public certificate verification
+- [Contact](/contact): Partnerships and support
+
+## Optional
+- [Privacy Policy](/privacy)
+- [Terms of Service](/terms)
+- [Leaderboard](/leaderboard)

@@ -1,0 +1,126 @@
+{
+  "nav": {
+    "home": "Home",
+    "about": "About",
+    "events": "Events",
+    "programs": "Programs",
+    "projects": "Projects",
+    "services": "Services",
+    "blog": "Blog",
+    "contact": "Contact",
+    "leaderboard": "Leaderboard",
+    "mentors": "Mentors",
+    "forum": "Forum",
+    "messages": "Messages",
+    "dashboard": "Dashboard",
+    "profile": "Profile",
+    "admin": "Admin",
+    "signIn": "Sign In",
+    "signOut": "Sign Out",
+    "getStarted": "Get Started",
+    "search": "Search…"
+  },
+  "common": {
+    "loading": "Loading…",
+    "save": "Save",
+    "cancel": "Cancel",
+    "send": "Send",
+    "language": "Language"
+  },
+  "auth": {
+    "welcomeBack": "Welcome Back",
+    "joinTechBridge": "Join TechBridge",
+    "signInSubtitle": "Sign in to your account",
+    "signUpSubtitle": "Create your account to get started",
+    "fullName": "Full Name",
+    "email": "Email",
+    "password": "Password",
+    "forgotPassword": "Forgot password?",
+    "createAccount": "Create Account",
+    "continueGoogle": "Continue with Google",
+    "noAccount": "Don't have an account?",
+    "haveAccount": "Already have an account?",
+    "signUp": "Sign Up"
+  },
+  "dashboard": {
+    "welcome": "Welcome back",
+    "recommended": "Recommended for you",
+    "upcoming": "Your Events",
+    "certificates": "Your Certificates",
+    "browseEvents": "Browse Events",
+    "noRecommendations": "No recommendations yet — explore events to get personalized picks."
+  },
+  "leaderboard": {
+    "title": "Leaderboard",
+    "subtitle": "Top contributors in our community",
+    "points": "points",
+    "badges": "badges",
+    "rank": "Rank"
+  },
+  "mentors": {
+    "title": "Mentors",
+    "subtitle": "Connect with experienced mentors in tech",
+    "becomeMentor": "Become a mentor",
+    "expertise": "Expertise",
+    "request": "Request mentorship",
+    "message": "Message"
+  },
+  "chat": {
+    "title": "Messages",
+    "newMessage": "New message…",
+    "noConversations": "No conversations yet",
+    "selectConversation": "Select a conversation to start chatting",
+    "typing": "{{name}} is typing…",
+    "someone": "Someone",
+    "sent": "Sent",
+    "read": "Read",
+    "attach": "Attach a file",
+    "uploadFailed": "Attachment upload failed",
+    "fileTooLarge": "File must be under {{size}}MB",
+    "edit": "Edit",
+    "delete": "Delete",
+    "save": "Save",
+    "edited": "edited",
+    "deletedMessage": "This message was deleted",
+    "confirmDelete": "Delete this message? Both participants will see it was deleted.",
+    "reactWith": "React with",
+    "history_one": "{{count}} change",
+    "history_other": "{{count}} changes",
+    "auditEdited": "edited this message",
+    "auditDeleted": "deleted this message"
+  },
+  "ai": {
+    "assistantTitle": "TechBridge AI",
+    "placeholder": "Ask anything about events, programs…",
+    "greeting": "Hi! I can help you discover events, programs, mentors, and more. What are you looking for?"
+  },
+  "search": {
+    "placeholder": "Search events, blog, projects…",
+    "events": "Events",
+    "blog": "Blog Posts",
+    "projects": "Projects",
+    "noResults": "No results found"
+  },
+  "footer": {
+    "tagline": "Bridging the gap between talent and technology through hackathons, bootcamps, and innovation programs.",
+    "quickLinks": "Quick Links",
+    "programs": "Programs",
+    "hackathons": "Hackathons",
+    "bootcamps": "Bootcamps",
+    "internships": "Internships",
+    "workshops": "Workshops",
+    "innovation": "Innovation Challenges",
+    "rights": "All rights reserved.",
+    "privacy": "Privacy",
+    "terms": "Terms",
+    "install": "Install"
+  },
+  "gamification": {
+    "badgeEarned": "Badge earned!",
+    "milestone": "Milestone",
+    "firstEvent": "First Event",
+    "firstProject": "Project Builder",
+    "firstCertificate": "Certified",
+    "communityHelper": "Community Helper"
+  }
+}

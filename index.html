@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="color-scheme" content="light dark" />
+
+    <title>TechBridge — Hackathons &amp; Bootcamps for Innovators</title>
+    <meta name="description" content="TechBridge empowers the next generation of innovators through hackathons, bootcamps, internships, and digital skills training worldwide." />
+    <meta name="author" content="TechBridge" />
+    <meta name="referrer" content="strict-origin-when-cross-origin" />
+
+    <!-- PWA -->
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <meta name="theme-color" content="#3B5BFF" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#0B1220" media="(prefers-color-scheme: dark)" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="TechBridge" />
+    <meta name="format-detection" content="telephone=no" />
+
+    <!-- Google Search Console verification -->
+    <meta name="google-site-verification" content="aYH0AOCsoal1IeTHdSN_ZDuaymr4XmVZa_kd2M7D6xw" />
+
+    <!-- Plausible analytics (privacy-friendly, cookieless). SPA pageviews are fired manually. -->
+    <script defer data-domain="techbridgehub.lovable.app" src="https://plausible.io/js/script.manual.js"></script>
+    <script>
+      window.plausible = window.plausible || function () { (window.plausible.q = window.plausible.q || []).push(arguments) };
+    </script>
+
+    <!-- Icons -->
+    <link rel="icon" type="image/png" href="/logo.png" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="icon" type="image/png" sizes="192x192" href="/pwa-icon-192.png" />
+    <link rel="icon" type="image/png" sizes="512x512" href="/pwa-icon-512.png" />
+
+    <!-- Feeds -->
+    <link rel="alternate" type="application/rss+xml" title="TechBridge Blog" href="https://rmtusfikecejennwrkxr.supabase.co/functions/v1/rss" />
+    <link rel="sitemap" type="application/xml" href="/sitemap.xml" />
+
+    <!-- Open Graph / Twitter -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="TechBridge" />
+    <meta property="og:url" content="https://techbridgehub.lovable.app/" />
+    <meta property="og:title" content="TechBridge — Hackathons &amp; Bootcamps" />
+    <meta property="og:description" content="Empowering innovators through hackathons, bootcamps, internships, and digital skills training worldwide." />
+    <meta property="og:image" content="https://techbridgehub.lovable.app/pwa-icon-512.png" />
+    <meta property="og:locale" content="en_US" />
+
+    <meta name="twitter:card" content="summary" />
+    <meta name="twitter:title" content="TechBridge — Hackathons &amp; Bootcamps" />
+    <meta name="twitter:description" content="Empowering innovators through hackathons, bootcamps, internships, and digital skills training worldwide." />
+    <meta name="twitter:image" content="https://techbridgehub.lovable.app/pwa-icon-512.png" />
+
+    <!-- Structured data -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@graph": [
+        {
+          "@type": "Organization",
+          "@id": "https://techbridgehub.lovable.app/#organization",
+          "name": "TechBridge",
+          "alternateName": "TechBridge Hub",
+          "url": "https://techbridgehub.lovable.app/",
+          "logo": {
+            "@type": "ImageObject",
+            "url": "https://techbridgehub.lovable.app/pwa-icon-512.png",
+            "width": 512,
+            "height": 512
+          },
+          "description": "Tech NGO empowering innovators through hackathons, bootcamps, internships, and digital skills training."
+        },
+        {
+          "@type": "WebSite",
+          "@id": "https://techbridgehub.lovable.app/#website",
+          "name": "TechBridge",
+          "url": "https://techbridgehub.lovable.app/",
+          "description": "Empowering innovators through hackathons, bootcamps, internships, and digital skills training worldwide.",
+          "inLanguage": ["en", "fr"],
+          "publisher": { "@id": "https://techbridgehub.lovable.app/#organization" },
+          "potentialAction": {
+            "@type": "SearchAction",
+            "target": {
+              "@type": "EntryPoint",
+              "urlTemplate": "https://techbridgehub.lovable.app/search?q={search_term_string}"
+            },
+            "query-input": "required name=search_term_string"
+          }
+        }
+      ]
+    }
+    </script>
+  </head>
+
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

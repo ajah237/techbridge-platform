@@ -1,0 +1,55 @@
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1790999533363,
+      "tag": "0000_submissions_sponsors_event_mode",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1791415035841,
+      "tag": "0001_lock_votes_badges_reviews",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1791650691990,
+      "tag": "0002_payment_instructions_cert_citations_vote_privacy",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1791651089142,
+      "tag": "0003_issue_team_certificates",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1791926765282,
+      "tag": "0004_realtime_team_registrations",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1794742517701,
+      "tag": "0005_live_results_during_judging",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1795142400000,
+      "tag": "0006_database_reorganization_and_security_hardening",
+      "breakpoints": true
+    }
+  ]
+}

@@ -1,0 +1,126 @@
+{
+  "nav": {
+    "home": "Accueil",
+    "about": "À propos",
+    "events": "Événements",
+    "programs": "Programmes",
+    "projects": "Projets",
+    "services": "Services",
+    "blog": "Blog",
+    "contact": "Contact",
+    "leaderboard": "Classement",
+    "mentors": "Mentors",
+    "forum": "Forum",
+    "messages": "Messages",
+    "dashboard": "Tableau de bord",
+    "profile": "Profil",
+    "admin": "Admin",
+    "signIn": "Connexion",
+    "signOut": "Déconnexion",
+    "getStarted": "Commencer",
+    "search": "Rechercher…"
+  },
+  "common": {
+    "loading": "Chargement…",
+    "save": "Enregistrer",
+    "cancel": "Annuler",
+    "send": "Envoyer",
+    "language": "Langue"
+  },
+  "auth": {
+    "welcomeBack": "Bon retour",
+    "joinTechBridge": "Rejoindre TechBridge",
+    "signInSubtitle": "Connectez-vous à votre compte",
+    "signUpSubtitle": "Créez votre compte pour commencer",
+    "fullName": "Nom complet",
+    "email": "Email",
+    "password": "Mot de passe",
+    "forgotPassword": "Mot de passe oublié ?",
+    "createAccount": "Créer le compte",
+    "continueGoogle": "Continuer avec Google",
+    "noAccount": "Pas de compte ?",
+    "haveAccount": "Vous avez déjà un compte ?",
+    "signUp": "S'inscrire"
+  },
+  "dashboard": {
+    "welcome": "Bon retour",
+    "recommended": "Recommandé pour vous",
+    "upcoming": "Vos événements",
+    "certificates": "Vos certificats",
+    "browseEvents": "Voir les événements",
+    "noRecommendations": "Pas encore de recommandations — explorez les événements pour obtenir des suggestions personnalisées."
+  },
+  "leaderboard": {
+    "title": "Classement",
+    "subtitle": "Les meilleurs contributeurs de la communauté",
+    "points": "points",
+    "badges": "badges",
+    "rank": "Rang"
+  },
+  "mentors": {
+    "title": "Mentors",
+    "subtitle": "Échangez avec des mentors expérimentés",
+    "becomeMentor": "Devenir mentor",
+    "expertise": "Expertise",
+    "request": "Demander un mentorat",
+    "message": "Message"
+  },
+  "chat": {
+    "title": "Messages",
+    "newMessage": "Nouveau message…",
+    "noConversations": "Aucune conversation",
+    "selectConversation": "Sélectionnez une conversation pour discuter",
+    "typing": "{{name}} est en train d'écrire…",
+    "someone": "Quelqu'un",
+    "sent": "Envoyé",
+    "read": "Lu",
+    "attach": "Joindre un fichier",
+    "uploadFailed": "Échec de l'envoi du fichier",
+    "fileTooLarge": "Le fichier doit faire moins de {{size}} Mo",
+    "edit": "Modifier",
+    "delete": "Supprimer",
+    "save": "Enregistrer",
+    "edited": "modifié",
+    "deletedMessage": "Ce message a été supprimé",
+    "confirmDelete": "Supprimer ce message ? Les deux participants verront qu'il a été supprimé.",
+    "reactWith": "Réagir avec",
+    "history_one": "{{count}} modification",
+    "history_other": "{{count}} modifications",
+    "auditEdited": "a modifié ce message",
+    "auditDeleted": "a supprimé ce message"
+  },
+  "ai": {
+    "assistantTitle": "TechBridge IA",
+    "placeholder": "Posez une question sur les événements, programmes…",
+    "greeting": "Bonjour ! Je peux vous aider à découvrir événements, programmes, mentors. Que cherchez-vous ?"
+  },
+  "search": {
+    "placeholder": "Rechercher événements, blog, projets…",
+    "events": "Événements",
+    "blog": "Articles",
+    "projects": "Projets",
+    "noResults": "Aucun résultat"
+  },
+  "footer": {
+    "tagline": "Rapprocher les talents et la technologie via hackathons, bootcamps et programmes d'innovation.",
+    "quickLinks": "Liens rapides",
+    "programs": "Programmes",
+    "hackathons": "Hackathons",
+    "bootcamps": "Bootcamps",
+    "internships": "Stages",
+    "workshops": "Ateliers",
+    "innovation": "Défis d'innovation",
+    "rights": "Tous droits réservés.",
+    "privacy": "Confidentialité",
+    "terms": "Conditions",
+    "install": "Installer"
+  },
+  "gamification": {
+    "badgeEarned": "Badge obtenu !",
+    "milestone": "Étape",
+    "firstEvent": "Premier événement",
+    "firstProject": "Créateur de projet",
+    "firstCertificate": "Certifié",
+    "communityHelper": "Aide de la communauté"
+  }
+}

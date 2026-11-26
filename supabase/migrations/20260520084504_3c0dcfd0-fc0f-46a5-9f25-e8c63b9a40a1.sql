@@ -1,0 +1,1 @@
+REVOKE EXECUTE ON FUNCTION public.add_team_captain() FROM PUBLIC, anon, authenticated;

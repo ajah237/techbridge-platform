@@ -1,0 +1,22 @@
+User-agent: Twitterbot
+Allow: /
+
+User-agent: facebookexternalhit
+Allow: /
+
+User-agent: *
+Allow: /
+Disallow: /admin
+Disallow: /admin/
+Disallow: /dashboard
+Disallow: /profile
+Disallow: /account/
+Disallow: /messages
+Disallow: /team-portal
+Disallow: /sponsor-portal
+Disallow: /judge/
+Disallow: /certificate/
+Disallow: /reset-password
+Disallow: /unsubscribe
+
+Sitemap: https://techbridgehub.lovable.app/sitemap.xml
