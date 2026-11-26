@@ -441,10 +441,15 @@ const Dashboard = () => {
           </div>
 
           {/* Profile Quick Actions */}
-          <div className="flex gap-3 pb-8">
+          <div className="flex flex-wrap gap-3 pb-8">
             <Button asChild variant="outline" className="flex-1 gap-2">
               <Link to="/profile">
                 <User size={16} /> Edit Profile
+              </Link>
+            </Button>
+            <Button asChild variant="secondary" className="flex-1 gap-2">
+              <Link to="/admin">
+                <Sparkles size={16} /> System Admin Dashboard
               </Link>
             </Button>
             <Button asChild className="flex-1 gap-2 bg-gradient-primary text-primary-foreground hover:opacity-90">

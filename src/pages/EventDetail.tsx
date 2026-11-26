@@ -69,6 +69,9 @@ const EventDetail = () => {
           .eq("event_id", data.id)
           .order("sort_order", { ascending: true });
         setPrograms(progs ?? []);
+        if (progs && progs.length > 0) {
+          setSelectedProgramId((prev) => prev || progs[0].id);
+        }
 
         const { data: cats } = await supabase
           .from("event_categories")
@@ -113,19 +116,19 @@ const EventDetail = () => {
   }, [user, event]);
 
   const handleRegister = async () => {
-    if (!user) { navigate("/auth"); return; }
-    if (!event) return;
-    if (programs.length > 0 && !selectedProgramId) {
-      toast.error("Please select a program first.");
+    if (!user) {
+      navigate(`/auth?redirect=${encodeURIComponent(window.location.pathname)}`);
       return;
     }
+    if (!event) return;
+    const progId = selectedProgramId || (programs.length > 0 ? programs[0].id : "");
     setRegistering(true);
     const { data: inserted, error } = await supabase
       .from("event_registrations")
       .insert({
         event_id: event.id,
         user_id: user.id,
-        program_id: selectedProgramId || null,
+        program_id: progId || null,
       })
       .select("participant_id, status")
       .maybeSingle();
@@ -136,7 +139,7 @@ const EventDetail = () => {
       const st = (inserted as any)?.status ?? "registered";
       setParticipantId(pid);
       setRegStatus(st);
-      setRegisteredProgramId(selectedProgramId || null);
+      setRegisteredProgramId(progId || null);
       if (st === "waitlisted") {
         toast.success("Event is full — you've been added to the waitlist. We'll notify you if a spot opens.");
       } else {
@@ -731,21 +734,7 @@ const EventDetail = () => {
                   </div>
                 )}
 
-                {categories.length > 0 ? (
-                  <div className="grid gap-2">
-                    <Button
-                      className="w-full bg-gradient-primary text-primary-foreground hover:opacity-90"
-                      disabled={!registrationOpen}
-                      onClick={() => navigate(`/events/${event.slug}/register`)}
-                    >
-                      <Ticket size={16} className="mr-2" />
-                      {registrationOpen ? "Register a team" : "Registration closed"}
-                    </Button>
-                    <p className="text-[11px] text-muted-foreground">
-                      Team registration in {categories.length} categor{categories.length > 1 ? "ies" : "y"} — you'll pick a category, add your institution, team and participants, then pay.
-                    </p>
-                  </div>
-                ) : (
+                <div className="grid gap-2">
                   <Button
                     className={`w-full ${canRegister ? "bg-gradient-primary text-primary-foreground hover:opacity-90" : ""}`}
                     variant={isRegistered ? "outline" : "default"}
@@ -758,9 +747,25 @@ const EventDetail = () => {
                       ? regStatus === "waitlisted" ? "✓ On Waitlist" : "✓ Registered"
                       : isFull
                       ? "Join Waitlist"
-                      : "Register Now"}
+                      : "Register Now (1-Click)"}
                   </Button>
-                )}
+                  {categories.length > 0 && (
+                    <>
+                      <Button
+                        variant="outline"
+                        className="w-full"
+                        disabled={!registrationOpen}
+                        onClick={() => navigate(`/events/${event.slug}/register`)}
+                      >
+                        <Ticket size={16} className="mr-2" />
+                        {registrationOpen ? "Register a Team" : "Team Registration Closed"}
+                      </Button>
+                      <p className="text-[11px] text-muted-foreground">
+                        Register individually in 1 click above, or register a school/university team of 1–5 members.
+                      </p>
+                    </>
+                  )}
+                </div>
 
                 {isRegistered && participantId && (
                   <div className="rounded-lg bg-muted/50 p-4 text-center space-y-3">

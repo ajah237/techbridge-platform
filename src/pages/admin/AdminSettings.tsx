@@ -36,10 +36,15 @@ type Settings = {
 };
 
 const empty: Settings = {
-  contact_email: "", contact_phone: "", office_address: "",
-  twitter_url: "", linkedin_url: "", github_url: "", youtube_url: "",
-  weekly_digest_enabled: false,
-  auto_issue_certificates: false,
+  contact_email: "bfozoh@gmail.com",
+  contact_phone: "+237 6 92 16 96 74",
+  office_address: "Yaoundé, Cameroon",
+  twitter_url: "https://twitter.com/techbridge",
+  linkedin_url: "https://www.linkedin.com/company/techbridge",
+  github_url: "https://github.com/ajah237/techbridge-platform",
+  youtube_url: "https://www.youtube.com/@techbridge",
+  weekly_digest_enabled: true,
+  auto_issue_certificates: true,
   about_hero_tagline: "", about_mission: "", about_vision: "",
   about_story: "",
   about_stats: {

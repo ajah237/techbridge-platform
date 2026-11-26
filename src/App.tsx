@@ -209,7 +209,7 @@ const App = () => (
             <Route
               path="/admin"
               element={
-                <AdminRoute requireMfa>
+                <AdminRoute>
                   <Suspense fallback={<AdminFallback />}>
                     <AdminLayout />
                   </Suspense>

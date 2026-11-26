@@ -61,7 +61,7 @@ const PrivacyPolicy = () => (
         <p>Your data may be processed in countries other than your own. We ensure appropriate safeguards are in place for international data transfers in compliance with applicable laws including GDPR.</p>
 
         <h2>10. Contact Us</h2>
-        <p>For privacy-related inquiries, contact us at <strong>privacy@techbridge.org</strong>.</p>
+        <p>For privacy-related inquiries, contact us at <strong>bfozoh@gmail.com</strong> or <strong>+237 6 92 16 96 74</strong> (Yaoundé, Cameroon).</p>
       </div>
     </section>
   </main>

@@ -71,7 +71,7 @@ const TermsOfService = () => (
         <p>These Terms are governed by the laws of the Republic of Cameroon. Any disputes shall be resolved in the courts of competent jurisdiction in Cameroon.</p>
 
         <h2>13. Contact</h2>
-        <p>For questions about these Terms, contact us at <strong>legal@techbridge.org</strong>.</p>
+        <p>For questions about these Terms, contact us at <strong>bfozoh@gmail.com</strong> or <strong>+237 6 92 16 96 74</strong> (Yaoundé, Cameroon).</p>
       </div>
     </section>
   </main>

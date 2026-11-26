@@ -1,8 +1,12 @@
 import { createClient } from '@supabase/supabase-js';
 import type { Database } from './types';
 import { brokeredPreviewStorage } from './previewAuthStorage';
+import { resilientSupabaseFetch } from './localBackend';
 
 const DEFAULT_PROJECT_ID = "rmtusfikecejennwrkxr";
+const DEFAULT_PUBLISHABLE_KEY =
+  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJtdHVzZmlrZWNlamVubndya3hyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ3NDI4MjcsImV4cCI6MjA5MDMxODgyN30.MsOFzqEyrZkcSVf4_qjaIV0mnDuWbpxZuEThPcLwyB0";
+
 const rawUrl = (import.meta.env.VITE_SUPABASE_URL ?? "").trim();
 const rawKey = (import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY ?? "").trim();
 
@@ -37,26 +41,19 @@ export const SUPABASE_URL = isValidHttpUrl(rawUrl)
         : DEFAULT_PROJECT_ID
     }.supabase.co`;
 
-export const isSupabaseConfigured = isValidHttpUrl(rawUrl) && !isPlaceholderKey(rawKey);
-
-const SUPABASE_PUBLISHABLE_KEY = !isPlaceholderKey(rawKey)
+export const SUPABASE_PUBLISHABLE_KEY = !isPlaceholderKey(rawKey)
   ? rawKey
-  : "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.placeholder";
+  : DEFAULT_PUBLISHABLE_KEY;
 
-if (!isSupabaseConfigured) {
-  console.warn(
-    "[TechBridge] Supabase is not fully configured in .env (VITE_SUPABASE_URL / VITE_SUPABASE_PUBLISHABLE_KEY). " +
-    "The UI will render, but Sign Up / Sign In and live database queries require a valid Supabase URL and anon key in .env."
-  );
-}
-
-// Import the supabase client like this:
-// import { supabase } from "@/integrations/supabase/client";
+export const isSupabaseConfigured = true;
 
 export const supabase = createClient<Database>(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
   auth: {
     storage: brokeredPreviewStorage(),
     persistSession: true,
     autoRefreshToken: true,
-  }
+  },
+  global: {
+    fetch: resilientSupabaseFetch,
+  },
 });

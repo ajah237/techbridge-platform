@@ -12,12 +12,12 @@ export type SiteSettings = {
 };
 
 const defaults: SiteSettings = {
-  contact_email: "hello@techbridge.org",
-  contact_phone: "+1 (555) 123-4567",
-  office_address: "TechBridge HQ\nYour City, Your Country",
+  contact_email: "bfozoh@gmail.com",
+  contact_phone: "+237 6 92 16 96 74",
+  office_address: "Yaoundé, Cameroon",
   twitter_url: "https://twitter.com/techbridge",
   linkedin_url: "https://www.linkedin.com/company/techbridge",
-  github_url: "https://github.com/techbridge",
+  github_url: "https://github.com/ajah237/techbridge-platform",
   youtube_url: "https://www.youtube.com/@techbridge",
 };
 
