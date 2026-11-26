@@ -312,12 +312,11 @@ const AdminSettings = () => {
           {saving ? "Saving…" : "Save Settings"}
         </Button>
 
-        <Card>
+        <Card id="backup-restore">
           <CardHeader>
-            <CardTitle>Backup &amp; export</CardTitle>
+            <CardTitle>Backup, Export &amp; Restore (Bootcamp Data Recovery)</CardTitle>
             <p className="text-xs text-muted-foreground">
-              Download a JSON snapshot of admin-visible tables for offline archival.
-              RLS still applies, so this only includes rows you can read.
+              Download a full JSON snapshot of all tables, or upload/paste a previous backup JSON file to recover past bootcamps, events, participant registrations, certificates, and profiles.
             </p>
           </CardHeader>
           <CardContent>

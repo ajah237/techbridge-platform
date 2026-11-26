@@ -1789,6 +1789,199 @@ async function handleStorageRequest(url: URL, init?: RequestInit): Promise<Respo
 
 let remoteUnreachable = false;
 
+export interface RestoreBackupOptions {
+  mode: "merge" | "replace";
+  tables?: string[];
+  preserveCameroonContact?: boolean;
+}
+
+export interface RestoreBackupResult {
+  restoredTables: Record<string, number>;
+  totalRows: number;
+  bootcampsRecovered: number;
+  eventsRecovered: number;
+}
+
+/**
+ * Normalizes any backup JSON structure into a map of tableName -> rows[].
+ * Supports:
+ * 1. Standard BackupExportButton JSON: { exported_at, schema_version, events: [...], ... }
+ * 2. Wrapped objects: { data: { events: [...] } } or { tables: { events: [...] } }
+ * 3. Single-table raw JSON array: [ { id, title, event_type: "bootcamp", ... } ]
+ */
+export function parseBackupJsonPayload(rawJson: unknown, fallbackTable = "events"): {
+  exportedAt: string | null;
+  tables: Record<string, AnyRecord[]>;
+} {
+  if (!rawJson || typeof rawJson !== "object") {
+    throw new Error("Invalid backup JSON: expected a JSON object or array.");
+  }
+
+  if (Array.isArray(rawJson)) {
+    const sample = rawJson[0] || {};
+    let detected = fallbackTable;
+    if ("event_type" in sample || ("title" in sample && "start_date" in sample)) detected = "events";
+    else if ("certificate_number" in sample) detected = "certificates";
+    else if ("team_name" in sample && "captain_email" in sample) detected = "team_registrations";
+    else if ("registered_at" in sample && "event_id" in sample) detected = "event_registrations";
+    else if ("full_name" in sample && "user_id" in sample) detected = "profiles";
+    else if ("excerpt" in sample || ("slug" in sample && "content" in sample)) detected = "blog_posts";
+    return {
+      exportedAt: null,
+      tables: { [detected]: rawJson.filter((r) => r && typeof r === "object") as AnyRecord[] },
+    };
+  }
+
+  const obj = rawJson as Record<string, any>;
+  const exportedAt = typeof obj.exported_at === "string" ? obj.exported_at : null;
+
+  const container =
+    obj.data && typeof obj.data === "object" && !Array.isArray(obj.data)
+      ? (obj.data as Record<string, any>)
+      : obj.tables && typeof obj.tables === "object" && !Array.isArray(obj.tables)
+        ? (obj.tables as Record<string, any>)
+        : obj;
+
+  const tables: Record<string, AnyRecord[]> = {};
+  for (const [key, value] of Object.entries(container)) {
+    if (key === "exported_at" || key === "schema_version" || key === "version") continue;
+    if (Array.isArray(value)) {
+      tables[key] = value.filter((item) => item && typeof item === "object") as AnyRecord[];
+    } else if (key === "site_settings" && value && typeof value === "object") {
+      tables[key] = [value as AnyRecord];
+    }
+  }
+
+  return { exportedAt, tables };
+}
+
+/**
+ * Restores parsed backup tables into the local persistent database (`tb_local_db_v2`)
+ * and returns a summary of restored table counts and recovered bootcamps/events.
+ */
+export function restoreLocalBackup(
+  tablesMap: Record<string, AnyRecord[]>,
+  options: RestoreBackupOptions = { mode: "merge", preserveCameroonContact: true },
+): RestoreBackupResult {
+  const db = loadLocalDb();
+  const nowIso = new Date().toISOString();
+  const selected = options.tables ? new Set(options.tables) : null;
+  const restoredTables: Record<string, number> = {};
+  let totalRows = 0;
+  let bootcampsRecovered = 0;
+  let eventsRecovered = 0;
+
+  const conflictKeyForTable = (table: string): string => {
+    switch (table) {
+      case "profiles":
+      case "mentor_profiles":
+        return "user_id";
+      case "certificates":
+        return "certificate_number";
+      case "newsletter_subscribers":
+        return "email";
+      default:
+        return "id";
+    }
+  };
+
+  for (const [tableName, rows] of Object.entries(tablesMap)) {
+    if (selected && !selected.has(tableName)) continue;
+    if (!Array.isArray(rows)) continue;
+
+    if (!db[tableName]) {
+      db[tableName] = [];
+    }
+
+    const key = conflictKeyForTable(tableName);
+
+    if (options.mode === "replace") {
+      db[tableName] = rows.map((r) => ({
+        id: r.id || uuid(),
+        created_at: r.created_at || nowIso,
+        ...r,
+      }));
+    } else {
+      // Merge / upsert mode
+      for (const incoming of rows) {
+        const normalized: AnyRecord = {
+          id: incoming.id || uuid(),
+          created_at: incoming.created_at || nowIso,
+          ...incoming,
+        };
+        const matchIdx = db[tableName].findIndex((existing) => {
+          if (normalized[key] && existing[key] === normalized[key]) return true;
+          if (normalized.id && existing.id === normalized.id) return true;
+          if (tableName === "events" && normalized.slug && existing.slug === normalized.slug) return true;
+          return false;
+        });
+        if (matchIdx !== -1) {
+          db[tableName][matchIdx] = { ...db[tableName][matchIdx], ...normalized };
+        } else {
+          db[tableName].push(normalized);
+        }
+      }
+    }
+
+    restoredTables[tableName] = rows.length;
+    totalRows += rows.length;
+
+    if (tableName === "events") {
+      eventsRecovered += rows.length;
+      bootcampsRecovered += rows.filter(
+        (e) =>
+          String(e.event_type || "").toLowerCase() === "bootcamp" ||
+          String(e.title || "").toLowerCase().includes("bootcamp"),
+      ).length;
+    }
+  }
+
+  // Ensure every restored profile has a corresponding user account entry so admin user lists & lookups work
+  if (db.profiles && Array.isArray(db.profiles)) {
+    for (const prof of db.profiles) {
+      if (!prof.user_id) continue;
+      const hasUser = db.users.some((u) => u.id === prof.user_id);
+      if (!hasUser) {
+        db.users.push({
+          id: prof.user_id,
+          email: prof.email || `user-${String(prof.user_id).slice(0, 6)}@techbridge.cm`,
+          password: "password123",
+          user_metadata: { full_name: prof.full_name || "TechBridge Participant" },
+          created_at: prof.created_at || nowIso,
+        });
+      }
+    }
+  }
+
+  // Preserve Cameroon contact settings if requested
+  if (options.preserveCameroonContact !== false && db.site_settings?.[0]) {
+    Object.assign(db.site_settings[0], {
+      contact_email: DEFAULT_CONTACT.contact_email,
+      contact_phone: DEFAULT_CONTACT.contact_phone,
+      office_address: DEFAULT_CONTACT.office_address,
+    });
+  }
+
+  db.admin_audit_log.unshift({
+    id: uuid(),
+    performed_by: db.users[0]?.id || "admin",
+    action: "backup.restored",
+    resource_type: "settings",
+    resource_id: null,
+    resource_label: `Restored ${totalRows} records across ${Object.keys(restoredTables).length} tables (${options.mode})`,
+    metadata: {
+      mode: options.mode,
+      tables: restoredTables,
+      bootcamps_recovered: bootcampsRecovered,
+      events_recovered: eventsRecovered,
+    },
+    created_at: nowIso,
+  });
+
+  saveLocalDb(db);
+  return { restoredTables, totalRows, bootcampsRecovered, eventsRecovered };
+}
+
 export const resilientSupabaseFetch: typeof fetch = async (input, init) => {
   const urlStr = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
   const parsedUrl = new URL(urlStr);

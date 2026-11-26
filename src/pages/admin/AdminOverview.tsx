@@ -297,6 +297,11 @@ const AdminOverview = () => {
                 <ShieldCheck className="h-4 w-4 mr-1.5" /> Auth Audit Logs
               </Link>
             </Button>
+            <Button asChild size="sm" variant="outline">
+              <Link to="/admin/settings#backup-restore">
+                <Database className="h-4 w-4 mr-1.5" /> Restore Backup JSON
+              </Link>
+            </Button>
           </div>
         </CardContent>
       </Card>
